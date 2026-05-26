@@ -1,80 +1,81 @@
 const Groq = require('groq-sdk');
 
-let groq;
-function getClient() {
-  if (!groq) {
-    groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-  }
-  return groq;
-}
-
-async function screenResume(resumeText, jobTitle, jobDescription) {
-  const client = getClient();
-  const prompt = `You are an expert AI recruiter. Analyze this resume for the job position and return ONLY a valid JSON object, no other text.
-
-JOB TITLE: ${jobTitle}
-JOB DESCRIPTION: ${jobDescription || 'Not provided'}
-
-RESUME TEXT:
-${resumeText.slice(0, 3000)}
-
-Return ONLY this JSON (no markdown, no backticks, no explanation):
+async function screenResumeWithAI(rawText, jobTitle) {
+  const prompt = `Extract candidate info from this resume. Return ONLY valid JSON, no other text:
 {
-  "name": "candidate full name from resume",
-  "email": "email from resume or empty string",
-  "phone": "phone from resume or empty string",
-  "summary": "2-3 sentence professional summary",
-  "skills": ["skill1", "skill2", "skill3", "skill4", "skill5"],
-  "missingSkills": ["missing required skill1", "missing required skill2"],
-  "riskFlags": ["any red flags like frequent job changes"],
-  "scoreBreakdown": {
-    "skills": 75,
-    "experience": 70,
-    "education": 65,
-    "overall": 72
-  },
-  "tier": "B",
-  "riskLevel": "low",
-  "recommendation": "hire",
-  "recommendationReason": "2-3 sentence explanation"
+  "name": "full name",
+  "email": "email or empty string",
+  "phone": "phone or empty string",
+  "domain": "main tech domain e.g. Java Backend",
+  "seniority": "Junior or Mid or Senior or Lead",
+  "experience_years": 3,
+  "topSkills": ["skill1","skill2","skill3","skill4","skill5"],
+  "aiScore": 75,
+  "tier": "A-Tier or B-Tier or C-Tier",
+  "riskLevel": "low or medium or high",
+  "summary": "2 sentence candidate summary"
+}
+Job Title: ${jobTitle || 'Software Engineer'}
+Resume Text:
+${rawText.slice(0, 3000)}`;
+
+  const providers = [tryGroq, tryOpenAI, tryAnthropic];
+
+  for (const provider of providers) {
+    try {
+      const result = await provider(prompt);
+      if (result) return result;
+    } catch (e) {
+      console.log(`[AI provider failed] ${e.message}`);
+    }
+  }
+
+  console.warn('[AI] All providers failed, using defaults');
+  return null;
 }
 
-Scoring: A-tier=80-100 (strong hire), B-tier=60-79 (interview), C-tier=below 60 (reject)`;
-
-  const response = await client.chat.completions.create({
+async function tryGroq(prompt) {
+  if (!process.env.GROQ_API_KEY) return null;
+  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  const resp = await groq.chat.completions.create({
     model: 'llama-3.3-70b-versatile',
     messages: [{ role: 'user', content: prompt }],
-    temperature: 0.3,
-    max_tokens: 1000,
+    temperature: 0.1,
+    max_tokens: 500,
   });
-
-  const text = response.choices[0].message.content.trim();
-  const cleaned = text.replace(/```json|```/g, '').trim();
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('No JSON found in response');
-  return JSON.parse(jsonMatch[0]);
+  return parseJSON(resp.choices[0].message.content);
 }
 
-async function generateInterviewQuestions(jobTitle, jobDescription) {
-  const client = getClient();
-  const prompt = `Generate 8 targeted interview questions for: ${jobTitle}
-Job Description: ${jobDescription || 'General role'}
-
-Return ONLY a JSON array, no other text:
-["question 1", "question 2", "question 3", "question 4", "question 5", "question 6", "question 7", "question 8"]`;
-
-  const response = await client.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
+async function tryOpenAI(prompt) {
+  if (!process.env.OPENAI_API_KEY) return null;
+  const { default: OpenAI } = await import('openai');
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const resp = await openai.chat.completions.create({
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
     messages: [{ role: 'user', content: prompt }],
-    temperature: 0.7,
-    max_tokens: 600,
+    temperature: 0.1,
+    max_tokens: 500,
   });
-
-  const text = response.choices[0].message.content.trim();
-  const cleaned = text.replace(/```json|```/g, '').trim();
-  const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) throw new Error('No JSON array found');
-  return JSON.parse(jsonMatch[0]);
+  return parseJSON(resp.choices[0].message.content);
 }
 
-module.exports = { screenResume, generateInterviewQuestions };
+async function tryAnthropic(prompt) {
+  if (!process.env.CLAUDE_API_KEY) return null;
+  const Anthropic = require('@anthropic-ai/sdk');
+  const client = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
+  const msg = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 500,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  return parseJSON(msg.content[0].text);
+}
+
+function parseJSON(text) {
+  const cleaned = text.replace(/```json|```/g, '').trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('No JSON in response');
+  return JSON.parse(match[0]);
+}
+
+module.exports = { screenResumeWithAI };

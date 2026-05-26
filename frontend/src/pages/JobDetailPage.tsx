@@ -19,7 +19,8 @@ interface Candidate {
   aiScore?: number;
   tier: string;
   riskLevel: string;
-  appliedAt: string;
+  appliedAt?: string;
+  createdAt?: string;
 }
 
 const tierColors: Record<string, string> = {

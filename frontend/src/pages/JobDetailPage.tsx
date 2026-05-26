@@ -15,7 +15,8 @@ interface Candidate {
   _id: string;
   name: string;
   email: string;
-  score: number;
+  score?: number;
+  aiScore?: number;
   tier: string;
   riskLevel: string;
   appliedAt: string;
@@ -197,14 +198,14 @@ export default function JobDetailPage() {
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
                             <div className="w-16 h-2 bg-gray-100 rounded-full">
-                              <div className="h-2 bg-blue-500 rounded-full" style={{ width: `${c.score}%` }} />
+                              <div className="h-2 bg-blue-500 rounded-full" style={{ width: `${c.aiScore || c.score || 0}%` }} />
                             </div>
-                            <span className="font-bold text-gray-900 text-sm">{c.score}</span>
+                            <span className="font-bold text-gray-900 text-sm">{c.aiScore || c.score || 0}</span>
                           </div>
                         </td>
                         <td className="px-4 py-3">
                           <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${tierColors[c.tier] || "bg-gray-100 text-gray-600"}`}>
-                            {c.tier}-Tier
+                            {c.tier?.replace(/-?Tier$/i, "")}-Tier
                           </span>
                         </td>
                         <td className="px-4 py-3">
@@ -212,7 +213,7 @@ export default function JobDetailPage() {
                             {c.riskLevel || "medium"}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-500">{new Date(c.appliedAt).toLocaleDateString()}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500">{c.createdAt ? new Date(c.createdAt).toLocaleDateString() : "—"}</td>
                       </tr>
                     ))}
                   </tbody>

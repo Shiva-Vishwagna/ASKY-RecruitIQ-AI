@@ -27,7 +27,7 @@ export default function CandidatesPage() {
   const [riskFilter, setRiskFilter] = useState("all");
   const [sortBy, setSortBy] = useState("score-desc");
 
-  const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+  const API = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
 
   // ✅ FIX 1: Refresh when page becomes visible (user navigates back after upload)

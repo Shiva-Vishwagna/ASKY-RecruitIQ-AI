@@ -31,7 +31,7 @@ export default function CandidateDetailPage() {
   const [feedbackRating, setFeedbackRating] = useState(3);
   const [savingFeedback, setSavingFeedback] = useState(false);
 
-  const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+  const API = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
 
   useEffect(() => { fetchCandidate(); }, [id]);

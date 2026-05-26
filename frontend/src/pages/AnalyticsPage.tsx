@@ -13,7 +13,7 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState("30");
 
-  const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+  const API = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
 
   useEffect(() => { fetchAnalytics(); }, [range]);

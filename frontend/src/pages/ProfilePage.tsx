@@ -16,7 +16,7 @@ export default function ProfilePage() {
   const [pwSaving, setPwSaving] = useState(false);
   const [pwMsg, setPwMsg] = useState("");
 
-  const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+  const API = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
 
   useEffect(() => {

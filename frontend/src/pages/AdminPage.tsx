@@ -25,7 +25,7 @@ export default function AdminPage() {
   const [creating, setCreating] = useState(false);
   const [systemStatus, setSystemStatus] = useState({ db: true, ai: true, storage: true });
 
-  const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+  const API = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
 
   useEffect(() => { fetchUsers(); checkSystem(); }, []);

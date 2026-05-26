@@ -36,7 +36,7 @@ export default function AuditLogsPage() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
 
-  const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+  const API = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
 
   useEffect(() => { fetchLogs(); }, []);

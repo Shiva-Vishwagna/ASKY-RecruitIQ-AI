@@ -1,26 +1,43 @@
 const Groq = require('groq-sdk');
 
 async function screenResumeWithAI(rawText, jobTitle) {
-  const prompt = `Extract candidate info from this resume. Return ONLY valid JSON, no other text:
+  const prompt = `You are an expert technical recruiter. Analyze this resume for the role: "${jobTitle || 'Software Engineer'}".
+
+Return ONLY valid JSON with no extra text:
 {
   "name": "full name",
   "email": "email or empty string",
   "phone": "phone or empty string",
-  "domain": "main tech domain e.g. Java Backend",
+  "domain": "primary tech domain e.g. Java Backend, React Frontend, DevOps",
   "seniority": "Junior or Mid or Senior or Lead",
-  "experience_years": 3,
+  "experience_years": 5,
   "topSkills": ["skill1","skill2","skill3","skill4","skill5"],
-  "aiScore": 75,
+  "aiScore": 78,
   "tier": "A-Tier or B-Tier or C-Tier",
   "riskLevel": "low or medium or high",
-  "summary": "2 sentence candidate summary"
+  "summary": "2-3 sentence overview of the candidate",
+  "projectDomains": ["Telecom","Banking"],
+  "technicalExperience": "2-3 sentences about their technical stack and project experience",
+  "leadershipExperience": "1-2 sentences about leadership or team experience, or 'No leadership experience mentioned'",
+  "cloudExpertise": "1-2 sentences about cloud/infra skills, or 'No cloud expertise mentioned'",
+  "databases": ["PostgreSQL","MongoDB"],
+  "frameworks": ["Spring Boot","React"],
+  "tools": ["Docker","Jenkins","Git"],
+  "strengths": ["strength 1","strength 2","strength 3"],
+  "gaps": ["gap 1","gap 2"],
+  "skillScores": [
+    {"skill": "Java", "score": 85},
+    {"skill": "Spring Boot", "score": 75},
+    {"skill": "SQL", "score": 70}
+  ],
+  "recommendation": "Strong Hire or Hire or Maybe or No Hire",
+  "recommendationReason": "2-3 sentence explanation of the hiring recommendation"
 }
-Job Title: ${jobTitle || 'Software Engineer'}
-Resume Text:
-${rawText.slice(0, 3000)}`;
+
+Resume:
+${rawText.slice(0, 4000)}`;
 
   const providers = [tryGroq, tryOpenAI, tryAnthropic];
-
   for (const provider of providers) {
     try {
       const result = await provider(prompt);
@@ -29,8 +46,7 @@ ${rawText.slice(0, 3000)}`;
       console.log(`[AI provider failed] ${e.message}`);
     }
   }
-
-  console.warn('[AI] All providers failed, using defaults');
+  console.warn('[AI] All providers failed');
   return null;
 }
 
@@ -41,7 +57,7 @@ async function tryGroq(prompt) {
     model: 'llama-3.3-70b-versatile',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.1,
-    max_tokens: 500,
+    max_tokens: 1000,
   });
   return parseJSON(resp.choices[0].message.content);
 }
@@ -54,7 +70,7 @@ async function tryOpenAI(prompt) {
     model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.1,
-    max_tokens: 500,
+    max_tokens: 1000,
   });
   return parseJSON(resp.choices[0].message.content);
 }
@@ -65,7 +81,7 @@ async function tryAnthropic(prompt) {
   const client = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
   const msg = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 500,
+    max_tokens: 1000,
     messages: [{ role: 'user', content: prompt }],
   });
   return parseJSON(msg.content[0].text);

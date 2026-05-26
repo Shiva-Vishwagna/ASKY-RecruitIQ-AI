@@ -6,13 +6,20 @@ interface Candidate {
   name: string;
   email: string;
   phone?: string;
-  jobTitle: string;
-  score: number;
+  jobTitle?: string;
+  appliedFor?: string;
+  score?: number;
+  aiScore?: number;
   tier: string;
-  riskLevel: string;
-  appliedAt: string;
+  riskLevel?: string;
+  appliedAt?: string;
+  createdAt?: string;
   summary?: string;
+  topSkills?: string[];
   skills?: string[];
+  domain?: string;
+  seniority?: string;
+  experienceYears?: number;
   missingSkills?: string[];
   riskFlags?: string[];
   recommendation?: string;
@@ -59,11 +66,15 @@ export default function CandidateDetailPage() {
   if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" /></div>;
   if (!candidate) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p className="text-gray-500">Candidate not found</p></div>;
 
-  const tierColor = { A: "from-emerald-400 to-emerald-600", B: "from-blue-400 to-blue-600", C: "from-amber-400 to-amber-600" }[candidate.tier] || "from-gray-400 to-gray-600";
+  const score = candidate.aiScore || candidate.score || 0;
+  const tierKey = candidate.tier?.replace(/-?Tier$/i, "");
+  const tierColor = { A: "from-emerald-400 to-emerald-600", B: "from-blue-400 to-blue-600", C: "from-amber-400 to-amber-600" }[tierKey] || "from-gray-400 to-gray-600";
+  const tierBadge = { A: "bg-emerald-100 text-emerald-700", B: "bg-blue-100 text-blue-700", C: "bg-amber-100 text-amber-700" }[tierKey] || "bg-gray-100 text-gray-600";
+  const allSkills = candidate.topSkills || candidate.skills || [];
+  const jobRole = candidate.appliedFor || candidate.jobTitle || "—";
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white border-b border-gray-100 px-6 py-4">
         <button onClick={() => navigate("/candidates")} className="text-gray-500 hover:text-blue-600 text-sm mb-3">← Back to Candidates</button>
         <div className="flex items-center gap-5">
@@ -75,20 +86,19 @@ export default function CandidateDetailPage() {
             <div className="flex gap-4 text-sm text-gray-500 mt-1 flex-wrap">
               <span>✉️ {candidate.email}</span>
               {candidate.phone && <span>📞 {candidate.phone}</span>}
-              <span>💼 Applied for: <strong className="text-gray-700">{candidate.jobTitle}</strong></span>
+              <span>💼 Applied for: <strong className="text-gray-700">{jobRole}</strong></span>
+              {candidate.seniority && <span>🎯 {candidate.seniority}</span>}
+              {candidate.experienceYears ? <span>📅 {candidate.experienceYears} yrs exp</span> : null}
             </div>
           </div>
           <div className="text-right">
-            <div className="text-4xl font-black text-gray-900">{candidate.score}</div>
+            <div className="text-4xl font-black text-gray-900">{score}</div>
             <div className="text-sm text-gray-500">AI Score</div>
-            <span className={`text-xs font-bold px-3 py-1 rounded-full mt-1 inline-block ${candidate.tier === "A" ? "bg-emerald-100 text-emerald-700" : candidate.tier === "B" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
-              {candidate.tier}-Tier
-            </span>
+            <span className={`text-xs font-bold px-3 py-1 rounded-full mt-1 inline-block ${tierBadge}`}>{tierKey}-Tier</span>
           </div>
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="bg-white border-b border-gray-100 px-6">
         <div className="flex gap-6">
           {["profile", "ai-analysis", "feedback", "recommendation"].map(tab => (
@@ -101,51 +111,58 @@ export default function CandidateDetailPage() {
       </div>
 
       <div className="p-6 max-w-4xl">
-        {/* Profile Tab */}
         {activeTab === "profile" && (
           <div className="space-y-5">
+            <div className="bg-white rounded-2xl p-6 border border-gray-100">
+              <h2 className="font-bold text-gray-900 mb-4">Candidate Info</h2>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div><span className="text-gray-500">Domain</span><p className="font-semibold text-gray-900 mt-0.5">{candidate.domain || "—"}</p></div>
+                <div><span className="text-gray-500">Seniority</span><p className="font-semibold text-gray-900 mt-0.5">{candidate.seniority || "—"}</p></div>
+                <div><span className="text-gray-500">Experience</span><p className="font-semibold text-gray-900 mt-0.5">{candidate.experienceYears ? `${candidate.experienceYears} years` : "—"}</p></div>
+                <div><span className="text-gray-500">Risk Level</span><p className="font-semibold text-gray-900 mt-0.5 capitalize">{candidate.riskLevel || "medium"}</p></div>
+                <div><span className="text-gray-500">Applied</span><p className="font-semibold text-gray-900 mt-0.5">{(candidate.createdAt||candidate.appliedAt) ? new Date(candidate.createdAt||candidate.appliedAt!).toLocaleDateString() : "—"}</p></div>
+              </div>
+            </div>
             {candidate.summary && (
               <div className="bg-white rounded-2xl p-6 border border-gray-100">
-                <h2 className="font-bold text-gray-900 mb-3">Resume Summary</h2>
+                <h2 className="font-bold text-gray-900 mb-3">AI Summary</h2>
                 <p className="text-gray-600 leading-relaxed">{candidate.summary}</p>
               </div>
             )}
-            {(candidate.skills?.length ?? 0) > 0 && (
+            {allSkills.length > 0 && (
               <div className="bg-white rounded-2xl p-6 border border-gray-100">
-                <h2 className="font-bold text-gray-900 mb-3">Detected Skills</h2>
+                <h2 className="font-bold text-gray-900 mb-3">Top Skills</h2>
                 <div className="flex flex-wrap gap-2">
-                  {candidate.skills!.map(s => (
+                  {allSkills.map(s => (
                     <span key={s} className="bg-blue-50 text-blue-700 text-sm font-medium px-3 py-1 rounded-full border border-blue-100">{s}</span>
                   ))}
                 </div>
               </div>
             )}
+            {allSkills.length === 0 && !candidate.summary && (
+              <div className="bg-white rounded-2xl p-8 border border-gray-100 text-center text-gray-400">
+                <div className="text-4xl mb-3">📄</div>
+                <p className="font-medium">Upload a resume to see AI-extracted profile data</p>
+              </div>
+            )}
           </div>
         )}
 
-        {/* AI Analysis Tab */}
-        {activeTab === "ai-analysis" ? (
+        {activeTab === "ai-analysis" && (
           <div className="space-y-5">
-            {candidate.scoreBreakdown ? (
-              <div className="bg-white rounded-2xl p-6 border border-gray-100">
-                <h2 className="font-bold text-gray-900 mb-5">Score Breakdown</h2>
-                <div className="space-y-4">
-                  {Object.entries(candidate.scoreBreakdown).map(([key, val]) => (
-                    <div key={key}>
-                      <div className="flex justify-between text-sm mb-1.5">
-                        <span className="font-medium text-gray-700 capitalize">{key}</span>
-                        <span className="font-bold text-gray-900">{val}/100</span>
-                      </div>
-                      <div className="h-2.5 bg-gray-100 rounded-full">
-                        <div className={`h-2.5 rounded-full ${val >= 80 ? "bg-emerald-500" : val >= 60 ? "bg-blue-500" : "bg-amber-500"}`}
-                          style={{ width: `${val}%` }} />
-                      </div>
-                    </div>
-                  ))}
+            <div className="bg-white rounded-2xl p-6 border border-gray-100">
+              <h2 className="font-bold text-gray-900 mb-3">AI Score</h2>
+              <div className="flex items-center gap-4">
+                <div className="text-5xl font-black text-gray-900">{score}</div>
+                <div className="flex-1">
+                  <div className="h-3 bg-gray-100 rounded-full">
+                    <div className={`h-3 rounded-full ${score >= 80 ? "bg-emerald-500" : score >= 60 ? "bg-blue-500" : "bg-amber-500"}`} style={{ width: `${score}%` }} />
+                  </div>
+                  <p className="text-sm text-gray-500 mt-2">{score >= 80 ? "Excellent candidate" : score >= 60 ? "Good candidate" : "Needs review"}</p>
                 </div>
               </div>
-            ) : null}
-            {(candidate.missingSkills?.length ?? 0) > 0 ? (
+            </div>
+            {(candidate.missingSkills?.length ?? 0) > 0 && (
               <div className="bg-white rounded-2xl p-6 border border-gray-100">
                 <h2 className="font-bold text-gray-900 mb-3">Skill Gaps</h2>
                 <div className="flex flex-wrap gap-2">
@@ -154,7 +171,7 @@ export default function CandidateDetailPage() {
                   ))}
                 </div>
               </div>
-            ) : null}
+            )}
             {(candidate.riskFlags?.length ?? 0) > 0 && (
               <div className="bg-white rounded-2xl p-6 border border-gray-100">
                 <h2 className="font-bold text-gray-900 mb-3">Risk Flags</h2>
@@ -168,9 +185,8 @@ export default function CandidateDetailPage() {
               </div>
             )}
           </div>
-        ) : null}
+        )}
 
-        {/* Feedback Tab */}
         {activeTab === "feedback" && (
           <div className="space-y-5">
             <div className="bg-white rounded-2xl p-6 border border-gray-100">
@@ -178,11 +194,9 @@ export default function CandidateDetailPage() {
               <div className="mb-4">
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Rating</label>
                 <div className="flex gap-2">
-                  {[1, 2, 3, 4, 5].map(r => (
+                  {[1,2,3,4,5].map(r => (
                     <button key={r} onClick={() => setFeedbackRating(r)}
-                      className={`w-10 h-10 rounded-xl font-bold text-sm transition-all ${feedbackRating >= r ? "bg-amber-400 text-white" : "bg-gray-100 text-gray-400"}`}>
-                      ★
-                    </button>
+                      className={`w-10 h-10 rounded-xl font-bold text-sm transition-all ${feedbackRating >= r ? "bg-amber-400 text-white" : "bg-gray-100 text-gray-400"}`}>★</button>
                   ))}
                   <span className="ml-2 self-center text-sm text-gray-500">{feedbackRating}/5</span>
                 </div>
@@ -208,29 +222,21 @@ export default function CandidateDetailPage() {
           </div>
         )}
 
-        {/* Recommendation Tab */}
         {activeTab === "recommendation" && (
           <div className="space-y-5">
-            {candidate.recommendation ? (
-              <div className="bg-white rounded-2xl p-6 border border-gray-100">
-                <h2 className="font-bold text-gray-900 mb-3">AI Recommendation</h2>
-                <div className={`inline-block px-4 py-1.5 rounded-full text-sm font-bold mb-4 ${
-                  candidate.recommendation === "Strong Hire" ? "bg-emerald-100 text-emerald-700" :
-                  candidate.recommendation === "Hire" ? "bg-blue-100 text-blue-700" :
-                  candidate.recommendation === "Maybe" ? "bg-amber-100 text-amber-700" :
-                  "bg-red-100 text-red-700"
-                }`}>
-                  {candidate.recommendation}
-                </div>
-                {candidate.recommendationReason && (
-                  <p className="text-gray-600 leading-relaxed">{candidate.recommendationReason}</p>
-                )}
-              </div>
-            ) : (
-              <div className="bg-white rounded-2xl p-6 border border-gray-100">
-                <p className="text-gray-500 text-sm">No recommendation available for this candidate yet.</p>
-              </div>
-            )}
+            <div className="bg-white rounded-2xl p-6 border border-gray-100">
+              <h2 className="font-bold text-gray-900 mb-3">AI Recommendation</h2>
+              {candidate.recommendation ? (
+                <>
+                  <div className={`inline-block px-4 py-1.5 rounded-full text-sm font-bold mb-4 ${candidate.recommendation === "Strong Hire" ? "bg-emerald-100 text-emerald-700" : candidate.recommendation === "Hire" ? "bg-blue-100 text-blue-700" : candidate.recommendation === "Maybe" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                    {candidate.recommendation}
+                  </div>
+                  {candidate.recommendationReason && <p className="text-gray-600 leading-relaxed">{candidate.recommendationReason}</p>}
+                </>
+              ) : (
+                <p className="text-gray-500 text-sm">Based on AI Score of <strong>{score}</strong>: {score >= 80 ? "Strong candidate — recommend moving forward." : score >= 60 ? "Good candidate — consider for interview." : "Below average — review manually before proceeding."}</p>
+              )}
+            </div>
           </div>
         )}
       </div>

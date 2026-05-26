@@ -16,6 +16,7 @@ interface Candidate {
   recommendation?: string; recommendationReason?: string;
   status?: string;
   interviewQuestions?: string[];
+  screeningScore?: number;
   screeningAnswers?: { question: string; answer: string; aiScore?: number; aiFeedback?: string; }[];
 }
 
@@ -27,6 +28,154 @@ const STATUSES = [
   { value: "hm_ready", label: "HM Ready", color: "bg-emerald-100 text-emerald-700" },
   { value: "rejected", label: "Rejected", color: "bg-red-100 text-red-700" },
 ];
+
+
+interface QuestionsTabProps {
+  candidate: Candidate; questions: string[]; setQuestions: (q: string[]) => void;
+  setCandidate: (c: any) => void; generatingQ: boolean; setGeneratingQ: (v: boolean) => void;
+  API: string; token: string; id: string;
+}
+
+function QuestionsTab({ candidate, questions, setQuestions, setCandidate, generatingQ, setGeneratingQ, API, token, id }: QuestionsTabProps) {
+  const [answers, setAnswers] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState((candidate.screeningAnswers?.length ?? 0) > 0);
+  const [result, setResult] = useState<{ screeningScore: number; combinedScore: number; status: string } | null>(null);
+
+  const hasAnswers = (candidate.screeningAnswers?.length ?? 0) > 0;
+  const screeningScore = candidate.screeningScore;
+
+  async function generateQuestions() {
+    setGeneratingQ(true);
+    try {
+      const res = await fetch(`${API}/candidates/${id}/questions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ jobTitle: candidate.appliedFor || candidate.jobTitle, skills: candidate.topSkills }),
+      });
+      const data = await res.json();
+      const qs = data.questions || [];
+      setQuestions(qs);
+      setAnswers(new Array(qs.length).fill(""));
+      setCandidate((prev: Candidate) => ({ ...prev, interviewQuestions: qs, status: data.status || prev.status }));
+    } catch { alert("Failed to generate questions."); }
+    finally { setGeneratingQ(false); }
+  }
+
+  async function submitAnswers() {
+    if (answers.some(a => !a.trim())) return alert("Please answer all questions before submitting.");
+    setSubmitting(true);
+    try {
+      const payload = questions.map((q, i) => ({ question: q, answer: answers[i] }));
+      const res = await fetch(`${API}/candidates/${id}/answers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ answers: payload }),
+      });
+      const data = await res.json();
+      setResult({ screeningScore: data.screeningScore, combinedScore: data.combinedScore, status: data.status });
+      setSubmitted(true);
+      setCandidate((prev: Candidate) => ({ ...prev, ...data.candidate }));
+    } catch { alert("Failed to submit answers."); }
+    finally { setSubmitting(false); }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-bold text-gray-900 text-lg">Interview Questions & Screening</h2>
+          <p className="text-sm text-gray-500 mt-0.5">AI-generated questions based on resume and role</p>
+        </div>
+        {!hasAnswers && (
+          <button onClick={generateQuestions} disabled={generatingQ}
+            className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-all disabled:opacity-60 text-sm">
+            {generatingQ ? "Generating..." : questions.length > 0 ? "↻ Regenerate" : "✨ Generate Questions"}
+          </button>
+        )}
+      </div>
+
+      {/* Result banner */}
+      {result && (
+        <div className={`rounded-2xl p-5 border ${result.status === "hm_ready" ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-2xl">{result.status === "hm_ready" ? "🎉" : "📋"}</span>
+            <div>
+              <p className="font-bold text-gray-900">{result.status === "hm_ready" ? "Candidate moved to HM Ready!" : "Answers submitted for review"}</p>
+              <p className="text-sm text-gray-600">Screening Score: <strong>{result.screeningScore}/100</strong> · Combined Score: <strong>{result.combinedScore}/100</strong></p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {questions.length === 0 && !hasAnswers ? (
+        <div className="bg-white rounded-2xl p-12 border border-gray-100 text-center text-gray-400">
+          <div className="text-5xl mb-4">❓</div>
+          <p className="font-medium">No questions yet</p>
+          <p className="text-sm mt-1">Click "Generate Questions" to create AI-powered screening questions</p>
+        </div>
+      ) : hasAnswers ? (
+        // Show submitted answers with scores
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl p-5 border border-gray-100 flex items-center gap-4">
+            <div className="text-center">
+              <div className="text-3xl font-black text-gray-900">{screeningScore ?? "—"}</div>
+              <div className="text-xs text-gray-500">Screening Score</div>
+            </div>
+            <div className="flex-1 h-3 bg-gray-100 rounded-full">
+              <div className={`h-3 rounded-full ${(screeningScore ?? 0) >= 80 ? "bg-emerald-500" : (screeningScore ?? 0) >= 60 ? "bg-blue-500" : "bg-amber-500"}`}
+                style={{ width: `${screeningScore ?? 0}%` }} />
+            </div>
+            <span className={`text-xs font-bold px-3 py-1.5 rounded-full ${(screeningScore ?? 0) >= 60 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+              {(screeningScore ?? 0) >= 60 ? "✓ Passed" : "Needs Review"}
+            </span>
+          </div>
+
+          {candidate.screeningAnswers!.map((sa, i) => (
+            <div key={i} className="bg-white rounded-xl p-5 border border-gray-100">
+              <div className="flex items-start justify-between mb-2">
+                <p className="font-semibold text-gray-800 text-sm flex-1">Q{i+1}: {sa.question}</p>
+                {sa.aiScore !== undefined && (
+                  <span className={`text-xs font-bold px-2.5 py-1 rounded-full ml-3 shrink-0 ${sa.aiScore >= 80 ? "bg-emerald-100 text-emerald-700" : sa.aiScore >= 60 ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>
+                    {sa.aiScore}/100
+                  </span>
+                )}
+              </div>
+              <p className="text-gray-600 text-sm bg-gray-50 p-3 rounded-lg mb-2">{sa.answer}</p>
+              {sa.aiFeedback && <p className="text-xs text-gray-500 italic">💡 {sa.aiFeedback}</p>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        // Show questions with answer inputs
+        <div className="space-y-4">
+          <div className="bg-blue-50 rounded-xl p-4 border border-blue-100 text-sm text-blue-700">
+            <strong>Instructions:</strong> Answer all {questions.length} questions below, then click Submit Answers. AI will score each response and automatically determine if the candidate is HM-ready.
+          </div>
+          {questions.map((q, i) => (
+            <div key={i} className="bg-white rounded-xl p-5 border border-gray-100">
+              <div className="flex gap-3 mb-3">
+                <span className="bg-blue-100 text-blue-700 font-bold text-sm w-8 h-8 rounded-full flex items-center justify-center shrink-0">{i + 1}</span>
+                <p className="text-gray-700 leading-relaxed font-medium">{q}</p>
+              </div>
+              <textarea
+                value={answers[i] || ""}
+                onChange={e => { const a = [...answers]; a[i] = e.target.value; setAnswers(a); }}
+                rows={3}
+                placeholder="Enter candidate's answer here..."
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              />
+            </div>
+          ))}
+          <button onClick={submitAnswers} disabled={submitting || answers.filter(a => a.trim()).length < questions.length}
+            className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-all disabled:opacity-60">
+            {submitting ? "Scoring answers with AI..." : `Submit ${questions.length} Answers for AI Screening`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function CandidateDetailPage() {
   const { id } = useParams();
@@ -307,59 +456,17 @@ export default function CandidateDetailPage() {
 
         {/* INTERVIEW QUESTIONS TAB */}
         {activeTab === "questions" && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="font-bold text-gray-900 text-lg">AI Interview Questions</h2>
-                <p className="text-sm text-gray-500 mt-0.5">Generated based on candidate's resume and applied role</p>
-              </div>
-              <button onClick={generateQuestions} disabled={generatingQ}
-                className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-all disabled:opacity-60 text-sm">
-                {generatingQ ? "Generating..." : questions.length > 0 ? "↻ Regenerate" : "✨ Generate Questions"}
-              </button>
-            </div>
-
-            {questions.length === 0 ? (
-              <div className="bg-white rounded-2xl p-12 border border-gray-100 text-center text-gray-400">
-                <div className="text-5xl mb-4">❓</div>
-                <p className="font-medium">No questions generated yet</p>
-                <p className="text-sm mt-1">Click "Generate Questions" to create AI-powered interview questions</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {questions.map((q, i) => (
-                  <div key={i} className="bg-white rounded-xl p-5 border border-gray-100 flex gap-4">
-                    <span className="bg-blue-100 text-blue-700 font-bold text-sm w-8 h-8 rounded-full flex items-center justify-center shrink-0">{i + 1}</span>
-                    <p className="text-gray-700 leading-relaxed">{q}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Screening answers */}
-            {(candidate.screeningAnswers?.length ?? 0) > 0 && (
-              <div className="mt-6">
-                <h3 className="font-bold text-gray-900 mb-4">Submitted Answers</h3>
-                {candidate.screeningAnswers!.map((sa, i) => (
-                  <div key={i} className="bg-white rounded-xl p-5 border border-gray-100 mb-3">
-                    <p className="font-semibold text-gray-800 text-sm mb-2">Q{i+1}: {sa.question}</p>
-                    <p className="text-gray-600 text-sm mb-3 bg-gray-50 p-3 rounded-lg">{sa.answer}</p>
-                    {sa.aiScore !== undefined && (
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-20 h-2 bg-gray-100 rounded-full">
-                            <div className={`h-2 rounded-full ${(sa.aiScore||0) >= 80 ? "bg-emerald-500" : (sa.aiScore||0) >= 60 ? "bg-blue-500" : "bg-amber-500"}`} style={{ width: `${sa.aiScore}%` }} />
-                          </div>
-                          <span className="text-sm font-bold text-gray-700">{sa.aiScore}/100</span>
-                        </div>
-                        {sa.aiFeedback && <p className="text-xs text-gray-500 italic">{sa.aiFeedback}</p>}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <QuestionsTab
+            candidate={candidate}
+            questions={questions}
+            setQuestions={setQuestions}
+            setCandidate={setCandidate}
+            generatingQ={generatingQ}
+            setGeneratingQ={setGeneratingQ}
+            API={API}
+            token={token || ""}
+            id={id || ""}
+          />
         )}
 
         {/* RECOMMENDATION TAB */}

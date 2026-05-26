@@ -105,7 +105,6 @@ export default function JobDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Top bar */}
       <div className="bg-white border-b border-gray-100 px-6 py-4">
         <button onClick={() => navigate("/jobs")} className="text-gray-500 hover:text-blue-600 text-sm mb-3 flex items-center gap-1">
           ← Back to Jobs
@@ -125,7 +124,6 @@ export default function JobDetailPage() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="bg-white border-b border-gray-100 px-6">
         <div className="flex gap-6">
           {["overview", "candidates", "questions"].map(tab => (
@@ -139,7 +137,6 @@ export default function JobDetailPage() {
       </div>
 
       <div className="p-6">
-        {/* Overview Tab */}
         {activeTab === "overview" && (
           <div className="max-w-3xl space-y-6">
             <div className="bg-white rounded-2xl p-6 border border-gray-100">
@@ -161,7 +158,6 @@ export default function JobDetailPage() {
           </div>
         )}
 
-        {/* Candidates Tab */}
         {activeTab === "candidates" && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -204,7 +200,7 @@ export default function JobDetailPage() {
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${tierColors[c.tier] || "bg-gray-100 text-gray-600"}`}>
+                          <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${tierColors[c.tier?.replace(/-?Tier$/i, "")] || "bg-gray-100 text-gray-600"}`}>
                             {c.tier?.replace(/-?Tier$/i, "")}-Tier
                           </span>
                         </td>
@@ -223,7 +219,6 @@ export default function JobDetailPage() {
           </div>
         )}
 
-        {/* Questions Tab */}
         {activeTab === "questions" && (
           <div className="max-w-3xl space-y-3">
             <h2 className="font-bold text-gray-900 text-lg">AI-Generated Interview Questions</h2>

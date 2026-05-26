@@ -6,10 +6,12 @@ interface Candidate {
   name: string;
   email: string;
   jobTitle: string;
-  score: number;
+  score?: number;
+  aiScore?: number;
   tier: string;
   riskLevel: string;
-  appliedAt: string;
+  appliedAt?: string;
+  createdAt?: string;
 }
 
 const tierColors: Record<string, string> = {
@@ -30,10 +32,8 @@ export default function CandidatesPage() {
   const API = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
 
-  // ✅ FIX 1: Refresh when page becomes visible (user navigates back after upload)
   useEffect(() => {
     fetchCandidates();
-
     const handleVisibility = () => {
       if (document.visibilityState === "visible") fetchCandidates();
     };
@@ -41,7 +41,6 @@ export default function CandidatesPage() {
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
 
-  // ✅ FIX 2: Also poll every 10 seconds to catch new uploads
   useEffect(() => {
     const interval = setInterval(fetchCandidates, 10000);
     return () => clearInterval(interval);
@@ -58,7 +57,7 @@ export default function CandidatesPage() {
 
   function exportCSV() {
     const headers = ["Name", "Email", "Job", "Score", "Tier", "Risk", "Applied"];
-    const rows = filtered.map(c => [c.name, c.email, c.jobTitle, c.score, c.tier, c.riskLevel, new Date(c.appliedAt).toLocaleDateString()]);
+    const rows = filtered.map(c => [c.name, c.email, c.jobTitle, (c.aiScore||c.score||0), c.tier?.replace(/-?Tier$/i,""), c.riskLevel, (c.createdAt||c.appliedAt) ? new Date(c.createdAt||c.appliedAt).toLocaleDateString() : "—"]);
     const csv = [headers, ...rows].map(r => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -68,19 +67,18 @@ export default function CandidatesPage() {
   const filtered = candidates
     .filter(c => {
       const matchSearch = c.name?.toLowerCase().includes(search.toLowerCase()) || c.email?.toLowerCase().includes(search.toLowerCase());
-      const matchTier = tierFilter === "all" || c.tier === tierFilter;
+      const matchTier = tierFilter === "all" || c.tier?.replace(/-?Tier$/i,"") === tierFilter;
       const matchRisk = riskFilter === "all" || c.riskLevel === riskFilter;
       return matchSearch && matchTier && matchRisk;
     })
     .sort((a, b) => {
-      if (sortBy === "score-desc") return b.score - a.score;
-      if (sortBy === "score-asc") return a.score - b.score;
+      if (sortBy === "score-desc") return (b.aiScore||b.score||0) - (a.aiScore||a.score||0);
+      if (sortBy === "score-asc") return (a.aiScore||a.score||0) - (b.aiScore||b.score||0);
       if (sortBy === "name") return a.name?.localeCompare(b.name);
-      if (sortBy === "date") return new Date(b.appliedAt).getTime() - new Date(a.appliedAt).getTime();
+      if (sortBy === "date") return new Date(b.createdAt||b.appliedAt||0).getTime() - new Date(a.createdAt||a.appliedAt||0).getTime();
       return 0;
     });
 
-  // ✅ FIX 3: Corrected delete URL from /api/resumes/ to /candidates/
   const handleDelete = async (candidateId: string, candidateName: string) => {
     if (!window.confirm(`Delete ${candidateName}? This cannot be undone.`)) return;
     try {
@@ -97,14 +95,12 @@ export default function CandidatesPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
-      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">All Candidates</h1>
           <p className="text-gray-500 mt-1">{candidates.length} total candidates across all jobs</p>
         </div>
         <div className="flex gap-3">
-          {/* ✅ FIX 4: Manual refresh button */}
           <button onClick={fetchCandidates} className="border border-gray-200 bg-white text-gray-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-gray-50 transition-all text-sm">
             ↻ Refresh
           </button>
@@ -114,7 +110,6 @@ export default function CandidatesPage() {
         </div>
       </div>
 
-      {/* Filters */}
       <div className="bg-white rounded-2xl p-4 border border-gray-100 mb-6 flex flex-wrap gap-3 items-center">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name or email..."
           className="border border-gray-200 rounded-xl px-4 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
@@ -142,7 +137,6 @@ export default function CandidatesPage() {
         <span className="text-sm text-gray-400 ml-auto">{filtered.length} results</span>
       </div>
 
-      {/* Table */}
       {loading ? (
         <div className="bg-white rounded-2xl border border-gray-100 p-8">
           {[...Array(5)].map((_, i) => (
@@ -182,43 +176,3 @@ export default function CandidatesPage() {
                       <div>
                         <div className="font-semibold text-gray-900 text-sm">{c.name}</div>
                         <div className="text-xs text-gray-500">{c.email}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3.5 text-sm text-gray-600">{c.jobTitle || "—"}</td>
-                  <td className="px-4 py-3.5">
-                    <div className="flex items-center gap-2">
-                      <div className="w-20 h-2 bg-gray-100 rounded-full">
-                        <div className={`h-2 rounded-full ${c.score >= 80 ? "bg-emerald-500" : c.score >= 60 ? "bg-blue-500" : "bg-amber-500"}`}
-                          style={{ width: `${c.score}%` }} />
-                      </div>
-                      <span className="font-bold text-gray-900 text-sm">{c.score}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${tierColors[c.tier] || "bg-gray-100 text-gray-600 border-gray-200"}`}>
-                      {c.tier}-Tier
-                    </span>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${c.riskLevel === "low" ? "bg-green-100 text-green-700" : c.riskLevel === "high" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
-                      {c.riskLevel || "medium"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3.5 text-sm text-gray-500">{new Date(c.appliedAt).toLocaleDateString()}</td>
-                  <td className="px-4 py-3.5">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleDelete(c._id, c.name); }}
-                      className="text-red-400 hover:text-red-600 hover:bg-red-50 border border-red-200 rounded-md px-2 py-1 text-xs font-medium transition-colors">
-                      🗑 Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}

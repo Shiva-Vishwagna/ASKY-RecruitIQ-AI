@@ -34,9 +34,7 @@ export default function CandidatesPage() {
 
   useEffect(() => {
     fetchCandidates();
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") fetchCandidates();
-    };
+    const handleVisibility = () => { if (document.visibilityState === "visible") fetchCandidates(); };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
@@ -82,15 +80,10 @@ export default function CandidatesPage() {
   const handleDelete = async (candidateId: string, candidateName: string) => {
     if (!window.confirm(`Delete ${candidateName}? This cannot be undone.`)) return;
     try {
-      const res = await fetch(`${API}/candidates/${candidateId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(`${API}/candidates/${candidateId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error("Delete failed.");
       setCandidates(prev => prev.filter(c => c._id !== candidateId));
-    } catch {
-      alert("Could not delete. Please try again.");
-    }
+    } catch { alert("Could not delete. Please try again."); }
   };
 
   return (
@@ -101,34 +94,25 @@ export default function CandidatesPage() {
           <p className="text-gray-500 mt-1">{candidates.length} total candidates across all jobs</p>
         </div>
         <div className="flex gap-3">
-          <button onClick={fetchCandidates} className="border border-gray-200 bg-white text-gray-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-gray-50 transition-all text-sm">
-            ↻ Refresh
-          </button>
-          <button onClick={exportCSV} className="border border-gray-200 bg-white text-gray-700 px-5 py-2.5 rounded-xl font-semibold hover:bg-gray-50 transition-all text-sm">
-            ↓ Export CSV
-          </button>
+          <button onClick={fetchCandidates} className="border border-gray-200 bg-white text-gray-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-gray-50 transition-all text-sm">↻ Refresh</button>
+          <button onClick={exportCSV} className="border border-gray-200 bg-white text-gray-700 px-5 py-2.5 rounded-xl font-semibold hover:bg-gray-50 transition-all text-sm">↓ Export CSV</button>
         </div>
       </div>
-
       <div className="bg-white rounded-2xl p-4 border border-gray-100 mb-6 flex flex-wrap gap-3 items-center">
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name or email..."
-          className="border border-gray-200 rounded-xl px-4 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
-        <select value={tierFilter} onChange={e => setTierFilter(e.target.value)}
-          className="border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name or email..." className="border border-gray-200 rounded-xl px-4 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+        <select value={tierFilter} onChange={e => setTierFilter(e.target.value)} className="border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="all">All Tiers</option>
           <option value="A">A-Tier</option>
           <option value="B">B-Tier</option>
           <option value="C">C-Tier</option>
         </select>
-        <select value={riskFilter} onChange={e => setRiskFilter(e.target.value)}
-          className="border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <select value={riskFilter} onChange={e => setRiskFilter(e.target.value)} className="border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="all">All Risk Levels</option>
           <option value="low">Low Risk</option>
           <option value="medium">Medium Risk</option>
           <option value="high">High Risk</option>
         </select>
-        <select value={sortBy} onChange={e => setSortBy(e.target.value)}
-          className="border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)} className="border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="score-desc">Score: High to Low</option>
           <option value="score-asc">Score: Low to High</option>
           <option value="name">Name A-Z</option>
@@ -136,7 +120,6 @@ export default function CandidatesPage() {
         </select>
         <span className="text-sm text-gray-400 ml-auto">{filtered.length} results</span>
       </div>
-
       {loading ? (
         <div className="bg-white rounded-2xl border border-gray-100 p-8">
           {[...Array(5)].map((_, i) => (
@@ -166,13 +149,47 @@ export default function CandidatesPage() {
             </thead>
             <tbody className="divide-y divide-gray-50">
               {filtered.map(c => (
-                <tr key={c._id} onClick={() => navigate(`/candidates/${c._id}`)}
-                  className="hover:bg-blue-50 cursor-pointer transition-colors">
+                <tr key={c._id} onClick={() => navigate(`/candidates/${c._id}`)} className="hover:bg-blue-50 cursor-pointer transition-colors">
                   <td className="px-4 py-3.5">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                        {c.name?.charAt(0)?.toUpperCase()}
-                      </div>
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold shrink-0">{c.name?.charAt(0)?.toUpperCase()}</div>
                       <div>
                         <div className="font-semibold text-gray-900 text-sm">{c.name}</div>
                         <div className="text-xs text-gray-500">{c.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3.5 text-sm text-gray-600">{c.jobTitle || "—"}</td>
+                  <td className="px-4 py-3.5">
+                    <div className="flex items-center gap-2">
+                      <div className="w-20 h-2 bg-gray-100 rounded-full">
+                        <div className={`h-2 rounded-full ${(c.aiScore||c.score||0) >= 80 ? "bg-emerald-500" : (c.aiScore||c.score||0) >= 60 ? "bg-blue-500" : "bg-amber-500"}`} style={{ width: `${c.aiScore||c.score||0}%` }} />
+                      </div>
+                      <span className="font-bold text-gray-900 text-sm">{c.aiScore||c.score||0}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3.5">
+                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${tierColors[c.tier?.replace(/-?Tier$/i,'')] || "bg-gray-100 text-gray-600 border-gray-200"}`}>
+                      {c.tier?.replace(/-?Tier$/i, '')}-Tier
+                    </span>
+                  </td>
+                  <td className="px-4 py-3.5">
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${c.riskLevel === "low" ? "bg-green-100 text-green-700" : c.riskLevel === "high" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
+                      {c.riskLevel || "medium"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3.5 text-sm text-gray-500">{(c.createdAt||c.appliedAt) ? new Date(c.createdAt||c.appliedAt).toLocaleDateString() : '—'}</td>
+                  <td className="px-4 py-3.5">
+                    <button onClick={(e) => { e.stopPropagation(); handleDelete(c._id, c.name); }} className="text-red-400 hover:text-red-600 hover:bg-red-50 border border-red-200 rounded-md px-2 py-1 text-xs font-medium transition-colors">
+                      🗑 Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

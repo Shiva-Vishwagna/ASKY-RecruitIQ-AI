@@ -77,6 +77,7 @@ export default function JobDetailPage() {
     const formData = new FormData();
     Array.from(files).forEach(f => formData.append("resumes", f));
     formData.append("jobId", id || "");
+    formData.append("jobTitle", job?.title || "");
     try {
       await fetch(`${API}/resumes/upload`, {
         method: "POST",

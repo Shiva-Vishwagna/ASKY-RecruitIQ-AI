@@ -108,3 +108,75 @@ router.delete('/:id', protect, async (req, res) => {
 });
 
 module.exports = router;
+
+// POST /api/candidates/:id/answers — submit screening answers and AI score them
+router.post('/:id/answers', protect, async (req, res) => {
+  try {
+    const candidate = await Candidate.findById(req.params.id);
+    if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
+
+    const { answers } = req.body; // [{ question, answer }]
+    if (!answers || !answers.length) return res.status(400).json({ message: 'No answers provided' });
+
+    const Groq = require('groq-sdk');
+    const scoredAnswers = [];
+    let totalScore = 0;
+
+    for (const { question, answer } of answers) {
+      let aiScore = 0;
+      let aiFeedback = '';
+
+      if (process.env.GROQ_API_KEY && answer?.trim()) {
+        try {
+          const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+          const prompt = `You are a technical interviewer. Score this answer from 0-100 and give brief feedback.
+Role: ${candidate.appliedFor || 'Software Engineer'}
+Question: ${question}
+Answer: ${answer}
+
+Return ONLY valid JSON: {"score": 75, "feedback": "Brief 1-sentence feedback"}`;
+
+          const resp = await groq.chat.completions.create({
+            model: 'llama-3.3-70b-versatile',
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.1, max_tokens: 150,
+          });
+          const text = resp.choices[0].message.content.replace(/```json|```/g, '').trim();
+          const match = text.match(/\{[\s\S]*\}/);
+          if (match) {
+            const parsed = JSON.parse(match[0]);
+            aiScore = parsed.score || 0;
+            aiFeedback = parsed.feedback || '';
+          }
+        } catch (e) { console.error('[answer scoring]', e.message); }
+      }
+
+      totalScore += aiScore;
+      scoredAnswers.push({ question, answer, aiScore, aiFeedback });
+    }
+
+    const screeningScore = Math.round(totalScore / answers.length);
+
+    // Auto-determine next status based on scores
+    const combinedScore = Math.round((screeningScore + (candidate.aiScore || 0)) / 2);
+    const newStatus = combinedScore >= 60 ? 'hm_ready' : 'answers_submitted';
+
+    const updated = await Candidate.findByIdAndUpdate(req.params.id, {
+      screeningAnswers: scoredAnswers,
+      screeningScore,
+      status: newStatus,
+      updatedAt: new Date(),
+    }, { new: true });
+
+    await AuditLog.create({
+      user: req.user.name, userId: req.user._id,
+      action: 'ANSWERS_SUBMITTED', resource: 'candidates',
+      details: `Screening answers submitted for ${candidate.name} — Screening Score: ${screeningScore}, Status: ${newStatus}`,
+    });
+
+    res.json({ candidate: updated, screeningScore, status: newStatus, combinedScore });
+  } catch (err) {
+    console.error('[answers]', err);
+    res.status(500).json({ message: err.message });
+  }
+});

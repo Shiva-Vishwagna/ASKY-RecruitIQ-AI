@@ -1,34 +1,19 @@
 import { useState, useEffect } from "react";
 
-interface User {
-  _id: string;
-  name: string;
-  email: string;
-  role: string;
-  createdAt: string;
-  lastLogin?: string;
-}
-
-const roles = ["admin", "recruiter", "hiring_manager", "interviewer"];
-const roleColors: Record<string, string> = {
-  admin: "bg-red-100 text-red-700",
-  recruiter: "bg-blue-100 text-blue-700",
-  hiring_manager: "bg-purple-100 text-purple-700",
-  interviewer: "bg-green-100 text-green-700",
-};
+interface User { _id: string; name: string; email: string; role: string; isActive: boolean; createdAt: string; lastLogin?: string; }
 
 export default function AdminPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "recruiter" });
-  const [creating, setCreating] = useState(false);
-  const [systemStatus, setSystemStatus] = useState({ db: true, ai: true, storage: true });
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "recruiter" });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
 
   const API = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
 
-  useEffect(() => { fetchUsers(); checkSystem(); }, []);
+  useEffect(() => { fetchUsers(); }, []);
 
   async function fetchUsers() {
     try {
@@ -39,29 +24,36 @@ export default function AdminPage() {
     finally { setLoading(false); }
   }
 
-  async function checkSystem() {
-    try {
-      const res = await fetch(`${API}/health`, { headers: { Authorization: `Bearer ${token}` } });
-      const data = await res.json();
-      setSystemStatus({ db: data.db !== false, ai: data.ai !== false, storage: data.storage !== false });
-    } catch { setSystemStatus({ db: false, ai: false, storage: false }); }
-  }
-
-  async function createUser() {
-    if (!newUser.name || !newUser.email || !newUser.password) return;
-    setCreating(true);
+  async function addUser() {
+    if (!form.name || !form.email || !form.password) return setMsg("All fields required.");
+    setSaving(true); setMsg("");
     try {
       const res = await fetch(`${API}/admin/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(newUser),
+        body: JSON.stringify(form),
       });
-      if (res.ok) { setShowModal(false); setNewUser({ name: "", email: "", password: "", role: "recruiter" }); fetchUsers(); }
-    } finally { setCreating(false); }
+      const data = await res.json();
+      if (!res.ok) return setMsg(data.message || "Failed to create user.");
+      setMsg("✅ User created successfully!");
+      setForm({ name: "", email: "", password: "", role: "recruiter" });
+      setShowAdd(false);
+      fetchUsers();
+    } catch { setMsg("Error creating user."); }
+    finally { setSaving(false); }
   }
 
-  async function deleteUser(userId: string) {
-    if (!confirm("Are you sure you want to remove this user?")) return;
+  async function toggleUser(userId: string, active: boolean) {
+    await fetch(`${API}/admin/users/${userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ isActive: !active }),
+    });
+    fetchUsers();
+  }
+
+  async function deleteUser(userId: string, name: string) {
+    if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
     await fetch(`${API}/admin/users/${userId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
     fetchUsers();
   }
@@ -70,119 +62,101 @@ export default function AdminPage() {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Admin Panel</h1>
-          <p className="text-gray-500 mt-1">Manage users and system settings</p>
+          <h1 className="text-3xl font-bold text-gray-900">User Management</h1>
+          <p className="text-gray-500 mt-1">{users.length} total users</p>
         </div>
-        <button onClick={() => setShowModal(true)}
-          className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-sm">
+        <button onClick={() => { setShowAdd(!showAdd); setMsg(""); }}
+          className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-all text-sm">
           + Add User
         </button>
       </div>
 
-      {/* System Status */}
-      <div className="bg-white rounded-2xl p-6 border border-gray-100 mb-6">
-        <h2 className="font-bold text-gray-900 mb-4">System Health</h2>
-        <div className="grid grid-cols-3 gap-4">
-          {[
-            { label: "MongoDB Database", key: "db", icon: "🗄️" },
-            { label: "OpenAI API", key: "ai", icon: "🤖" },
-            { label: "File Storage", key: "storage", icon: "📁" },
-          ].map(({ label, key, icon }) => (
-            <div key={key} className={`rounded-xl p-4 border ${systemStatus[key as keyof typeof systemStatus] ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"}`}>
-              <div className="flex items-center gap-2">
-                <span>{icon}</span>
-                <span className={`text-sm font-bold ${systemStatus[key as keyof typeof systemStatus] ? "text-emerald-700" : "text-red-700"}`}>
-                  {systemStatus[key as keyof typeof systemStatus] ? "● Connected" : "● Disconnected"}
-                </span>
-              </div>
-              <p className="text-xs text-gray-600 mt-1">{label}</p>
-            </div>
-          ))}
+      {/* Add User Form */}
+      {showAdd && (
+        <div className="bg-white rounded-2xl p-6 border border-gray-100 mb-6">
+          <h2 className="font-bold text-gray-900 mb-4">New User</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <input placeholder="Full Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
+              className="border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <input placeholder="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })}
+              className="border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <input placeholder="Password" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
+              className="border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}
+              className="border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="recruiter">Recruiter</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          {msg && <p className={`text-sm mb-3 ${msg.startsWith("✅") ? "text-green-600" : "text-red-500"}`}>{msg}</p>}
+          <div className="flex gap-3">
+            <button onClick={addUser} disabled={saving}
+              className="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-all disabled:opacity-60 text-sm">
+              {saving ? "Creating..." : "Create User"}
+            </button>
+            <button onClick={() => setShowAdd(false)} className="border border-gray-200 px-6 py-2.5 rounded-xl font-semibold text-gray-600 hover:bg-gray-50 text-sm">
+              Cancel
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Users Table */}
-      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-        <div className="p-6 border-b border-gray-50">
-          <h2 className="font-bold text-gray-900">User Management</h2>
-          <p className="text-sm text-gray-500 mt-0.5">{users.length} total users</p>
-        </div>
-        {loading ? (
-          <div className="p-8 text-center text-gray-400">Loading users...</div>
-        ) : (
+      {loading ? (
+        <div className="bg-white rounded-2xl p-8 border border-gray-100 text-center text-gray-400">Loading...</div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <table className="w-full">
-            <thead className="bg-gray-50">
+            <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                {["Name", "Email", "Role", "Created", "Last Login", "Actions"].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
+                {["User", "Role", "Status", "Last Login", "Actions"].map(h => (
+                  <th key={h} className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {users.map(u => (
-                <tr key={u._id} className="hover:bg-gray-50 transition-colors">
+                <tr key={u._id} className="hover:bg-gray-50">
                   <td className="px-4 py-3.5">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold">
                         {u.name?.charAt(0)?.toUpperCase()}
                       </div>
-                      <span className="font-semibold text-gray-900 text-sm">{u.name}</span>
+                      <div>
+                        <div className="font-semibold text-gray-900 text-sm">{u.name}</div>
+                        <div className="text-xs text-gray-500">{u.email}</div>
+                      </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3.5 text-sm text-gray-600">{u.email}</td>
                   <td className="px-4 py-3.5">
-                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${roleColors[u.role] || "bg-gray-100 text-gray-600"}`}>
-                      {u.role?.replace("_", " ")}
+                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${u.role === "admin" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}`}>
+                      {u.role}
                     </span>
                   </td>
-                  <td className="px-4 py-3.5 text-sm text-gray-500">{new Date(u.createdAt).toLocaleDateString()}</td>
-                  <td className="px-4 py-3.5 text-sm text-gray-500">{u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : "Never"}</td>
                   <td className="px-4 py-3.5">
-                    <button onClick={() => deleteUser(u._id)}
-                      className="text-red-500 hover:text-red-700 text-sm font-medium hover:bg-red-50 px-2 py-1 rounded-lg transition-all">
-                      Remove
-                    </button>
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${u.isActive ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                      {u.isActive ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3.5 text-sm text-gray-500">
+                    {u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : "Never"}
+                  </td>
+                  <td className="px-4 py-3.5">
+                    <div className="flex gap-2">
+                      <button onClick={() => toggleUser(u._id, u.isActive)}
+                        className={`text-xs px-3 py-1 rounded-lg font-medium border transition-colors ${u.isActive ? "border-red-200 text-red-600 hover:bg-red-50" : "border-green-200 text-green-600 hover:bg-green-50"}`}>
+                        {u.isActive ? "Deactivate" : "Activate"}
+                      </button>
+                      <button onClick={() => deleteUser(u._id, u.name)}
+                        className="text-xs px-3 py-1 rounded-lg font-medium border border-red-200 text-red-500 hover:bg-red-50 transition-colors">
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
-      </div>
-
-      {/* Add User Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl p-8 w-full max-w-md shadow-2xl">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Add New User</h2>
-            <div className="space-y-4">
-              {[{ k: "name", l: "Full Name", p: "John Smith" }, { k: "email", l: "Email", p: "john@company.com" }, { k: "password", l: "Temporary Password", p: "Min 8 characters" }].map(({ k, l, p }) => (
-                <div key={k}>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">{l} *</label>
-                  <input type={k === "password" ? "password" : "text"}
-                    value={newUser[k as keyof typeof newUser]}
-                    onChange={e => setNewUser({ ...newUser, [k]: e.target.value })}
-                    placeholder={p}
-                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
-                </div>
-              ))}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">Role *</label>
-                <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
-                  {roles.map(r => <option key={r} value={r}>{r.replace("_", " ").replace(/\b\w/g, c => c.toUpperCase())}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowModal(false)}
-                className="flex-1 border border-gray-200 py-2.5 rounded-xl font-semibold text-gray-600 hover:bg-gray-50 transition-all text-sm">Cancel</button>
-              <button onClick={createUser} disabled={creating}
-                className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-all disabled:opacity-60 text-sm">
-                {creating ? "Creating..." : "Create User"}
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

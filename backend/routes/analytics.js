@@ -18,10 +18,10 @@ router.get('/', protect, async (req, res) => {
     ]);
 
     const avgScore = candidates.length
-      ? Math.round(candidates.reduce((s, c) => s + c.score, 0) / candidates.length)
+      ? Math.round(candidates.reduce((s, c) => s + (c.aiScore || c.score || 0), 0) / candidates.length)
       : 0;
 
-    const hired = candidates.filter(c => c.recommendation === 'hire').length;
+    const hired = candidates.filter(c => c.recommendation === 'Strong Hire' || c.recommendation === 'Hire' || c.status === 'hm_ready').length;
     const hireRate = candidates.length ? Math.round((hired / candidates.length) * 100) : 0;
 
     // Tier distribution

@@ -17,6 +17,9 @@ const CandidateSchema = new mongoose.Schema({
   uploadedBy:      { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   uploadedByName:  { type: String },
   summary:         { type: String },
+  primarySkillMatch: { type: Boolean },
+  primarySkillScore: { type: Number },
+  jobFitScore:       { type: Number },
 
   // Rich AI analysis fields
   technicalExperience:  { type: String },

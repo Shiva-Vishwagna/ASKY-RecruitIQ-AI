@@ -10,6 +10,11 @@ const jobSchema = new mongoose.Schema({
   createdBy:      { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   candidateCount: { type: Number, default: 0 },
   questions:      [{ type: String }],
+  // Level Engine fields
+  level:          { type: String, default: 'Mid' },
+  primarySkill:   { type: String, default: '' },
+  requiredSkills: [{ type: String }],
+  minAiScore:     { type: Number, default: 60 },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Job', jobSchema);

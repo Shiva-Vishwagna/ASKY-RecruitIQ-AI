@@ -16,7 +16,13 @@ export default function DashboardPage() {
           API.get('/analytics'),
           API.get('/candidates'),
         ]);
-        setStats(analyticsRes.data.summary);
+        const s = analyticsRes.data.summary || {};
+        setStats({
+          totalJobs: s.totalJobs || 0,
+          totalCandidates: s.totalCandidates || 0,
+          avgScore: s.avgScore || 0,
+          hireRate: s.hireRate || 0,
+        });
         setRecentCandidates((candidatesRes.data.candidates || []).slice(0, 5));
       } catch (e) { /* ignore */ }
       finally { setLoading(false); }
@@ -27,7 +33,7 @@ export default function DashboardPage() {
   const statCards = [
     { label: 'Total Jobs', value: stats.totalJobs, icon: '💼', color: 'blue', path: '/jobs' },
     { label: 'Total Candidates', value: stats.totalCandidates, icon: '👥', color: 'purple', path: '/candidates' },
-    { label: 'Average AI Score', value: `${stats.avgScore}/100`, icon: '🎯', color: 'emerald', path: '/analytics' },
+    { label: 'Average AI Score', value: `${stats.avgScore || 0}/100`, icon: '🎯', color: 'emerald', path: '/analytics' },
     { label: 'Hire Rate', value: `${stats.hireRate}%`, icon: '✅', color: 'amber', path: '/analytics' },
   ];
 

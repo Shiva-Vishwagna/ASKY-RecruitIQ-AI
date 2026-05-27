@@ -8,8 +8,24 @@ const Groq = require('groq-sdk');
 // GET /api/candidates
 router.get('/', protect, async (req, res) => {
   try {
-    const candidates = await Candidate.find().sort({ createdAt: -1 });
-    res.json({ candidates });
+    const candidates = await Candidate.find()
+      .populate('jobId', 'title department location')
+      .sort({ createdAt: -1 });
+
+    // Enrich jobTitle from populated jobId if appliedFor is missing
+    const enriched = candidates.map(c => {
+      const obj = c.toObject();
+      if (obj.jobId && typeof obj.jobId === 'object') {
+        obj.jobTitle = obj.appliedFor || obj.jobId.title || '';
+        obj.jobDepartment = obj.jobId.department || '';
+        obj.jobLocation = obj.jobId.location || '';
+      } else {
+        obj.jobTitle = obj.appliedFor || '';
+      }
+      return obj;
+    });
+
+    res.json({ candidates: enriched });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -177,6 +193,59 @@ Return ONLY valid JSON: {"score": 75, "feedback": "Brief 1-sentence feedback"}`;
     res.json({ candidate: updated, screeningScore, status: newStatus, combinedScore });
   } catch (err) {
     console.error('[answers]', err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST /api/candidates/:id/rescreen — re-run AI scoring on existing candidate data
+router.post('/:id/rescreen', protect, async (req, res) => {
+  try {
+    const candidate = await Candidate.findById(req.params.id);
+    if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
+
+    const { screenResumeWithAI } = require('../services/aiService');
+
+    // Build a text summary from stored candidate data to re-screen
+    const resumeText = `
+Name: ${candidate.name}
+Email: ${candidate.email}
+Phone: ${candidate.phone || ''}
+Domain: ${candidate.domain || ''}
+Seniority: ${candidate.seniority || ''}
+Experience: ${candidate.experienceYears || 0} years
+Skills: ${(candidate.topSkills || []).join(', ')}
+Applied For: ${candidate.appliedFor || ''}
+Summary: ${candidate.summary || ''}
+    `.trim();
+
+    const ai = await screenResumeWithAI(resumeText, candidate.appliedFor || '');
+
+    if (!ai) return res.status(500).json({ message: 'AI screening failed — check API keys' });
+
+    const updated = await Candidate.findByIdAndUpdate(req.params.id, {
+      aiScore:         Number(ai.aiScore) || 0,
+      tier:            ai.tier || candidate.tier,
+      riskLevel:       ai.riskLevel || candidate.riskLevel,
+      summary:         ai.summary || candidate.summary,
+      topSkills:       ai.topSkills?.length ? ai.topSkills : candidate.topSkills,
+      skillScores:     ai.skillScores || [],
+      strengths:       ai.strengths || [],
+      gaps:            ai.gaps || [],
+      technicalExperience:  ai.technicalExperience || '',
+      leadershipExperience: ai.leadershipExperience || '',
+      cloudExpertise:       ai.cloudExpertise || '',
+      databases:       ai.databases || [],
+      frameworks:      ai.frameworks || [],
+      tools:           ai.tools || [],
+      recommendation:       ai.recommendation || '',
+      recommendationReason: ai.recommendationReason || '',
+      status:          'ai_screened',
+      updatedAt:       new Date(),
+    }, { new: true });
+
+    res.json({ candidate: updated, aiScore: updated.aiScore });
+  } catch (err) {
+    console.error('[rescreen]', err);
     res.status(500).json({ message: err.message });
   }
 });

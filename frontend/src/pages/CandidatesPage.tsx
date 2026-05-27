@@ -28,6 +28,7 @@ export default function CandidatesPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
+  const [recruiterFilter, setRecruiterFilter] = useState("all");
 
   // Filters
   const [search, setSearch]           = useState("");
@@ -43,6 +44,8 @@ export default function CandidatesPage() {
 
   const API = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const isAdmin = user.role === "admin";
 
   useEffect(() => {
     fetchCandidates();
@@ -344,10 +347,12 @@ export default function CandidatesPage() {
                       {(c.createdAt||c.appliedAt) ? new Date(c.createdAt||c.appliedAt).toLocaleDateString() : "—"}
                     </td>
                     <td className="px-4 py-3.5">
-                      <button onClick={e => { e.stopPropagation(); handleDelete(c._id, c.name); }}
-                        className="text-red-400 hover:text-red-600 hover:bg-red-50 border border-red-200 rounded-md px-2 py-1 text-xs transition-colors">
-                        🗑
-                      </button>
+                      {isAdmin && (
+                        <button onClick={e => { e.stopPropagation(); handleDelete(c._id, c.name); }}
+                          className="text-red-400 hover:text-red-600 hover:bg-red-50 border border-red-200 rounded-md px-2 py-1 text-xs transition-colors">
+                          🗑
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

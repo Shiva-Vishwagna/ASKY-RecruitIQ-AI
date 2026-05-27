@@ -26,7 +26,7 @@ export default function JobsPage() {
   const [skillInput, setSkillInput] = useState("");
   const [newJob, setNewJob] = useState({
     title: "", department: "", location: "", description: "",
-    level: "Mid", requiredSkills: [] as string[], minAiScore: 60,
+    primarySkill: "", level: "Mid", requiredSkills: [] as string[], minAiScore: 60,
   });
   const [creating, setCreating] = useState(false);
 
@@ -51,11 +51,11 @@ export default function JobsPage() {
       const res = await fetch(`${API}/jobs`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(newJob),
+        body: JSON.stringify({ ...newJob }),
       });
       if (res.ok) {
         setShowModal(false);
-        setNewJob({ title: "", department: "", location: "", description: "", level: "Mid", requiredSkills: [], minAiScore: 60 });
+        setNewJob({ title: "", department: "", location: "", description: "", primarySkill: "", level: "Mid", requiredSkills: [], minAiScore: 60 });
         fetchJobs();
       }
     } finally { setCreating(false); }
@@ -130,6 +130,7 @@ export default function JobsPage() {
                 <div className="flex items-center gap-2">🏢 <span>{job.department}</span></div>
                 <div className="flex items-center gap-2">📍 <span>{job.location || "Remote"}</span></div>
                 {job.level && <div className="flex items-center gap-2">🎯 <span>{job.level} Level</span></div>}
+                {(job as any).primarySkill && <div className="flex items-center gap-2">🔑 <span>Primary: {(job as any).primarySkill}</span></div>}
                 {job.minAiScore ? <div className="flex items-center gap-2">⭐ <span>Min Score: {job.minAiScore}</span></div> : null}
               </div>
               {(job.requiredSkills?.length ?? 0) > 0 && (
@@ -185,6 +186,13 @@ export default function JobsPage() {
               {/* Level Engine section */}
               <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
                 <h3 className="font-bold text-blue-800 mb-3">⚙️ Level Engine</h3>
+                <div className="mb-4">
+                  <label className="block text-sm font-semibold text-gray-700 mb-1">Primary Skill Required <span className="text-red-500">*</span></label>
+                  <input value={newJob.primarySkill} onChange={e => setNewJob({ ...newJob, primarySkill: e.target.value })}
+                    placeholder="e.g. React, Java, Python, Angular..."
+                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-sm" />
+                  <p className="text-xs text-gray-400 mt-1">Candidates without this skill will automatically receive a lower AI score</p>
+                </div>
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-1">Experience Level</label>

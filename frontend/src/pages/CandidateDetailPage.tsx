@@ -14,6 +14,7 @@ interface Candidate {
   strengths?: string[]; gaps?: string[];
   skillScores?: SkillScore[];
   recommendation?: string; recommendationReason?: string;
+  primarySkillMatch?: boolean; primarySkillScore?: number; jobFitScore?: number;
   status?: string;
   interviewQuestions?: string[];
   screeningScore?: number;
@@ -189,6 +190,8 @@ export default function CandidateDetailPage() {
 
   const API = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const isAdmin = user.role === "admin";
 
   useEffect(() => { fetchCandidate(); }, [id]);
 
@@ -216,6 +219,21 @@ export default function CandidateDetailPage() {
       setCandidate(prev => prev ? { ...prev, interviewQuestions: qs } : prev);
     } catch { alert("Failed to generate questions."); }
     finally { setGeneratingQ(false); }
+  }
+
+  async function rescreenCandidate() {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/candidates/${id}/rescreen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.message || "Re-screen failed"); setLoading(false); return; }
+      setCandidate(prev => prev ? { ...prev, ...data.candidate } : null);
+      alert(`✅ Re-screened! New AI Score: ${data.aiScore}`);
+    } catch { alert("Re-screen failed."); }
+    finally { setLoading(false); }
   }
 
   async function updateStatus(newStatus: string) {
@@ -280,8 +298,33 @@ export default function CandidateDetailPage() {
               className={`text-xs font-semibold px-3 py-1.5 rounded-lg border-0 focus:ring-2 focus:ring-blue-500 cursor-pointer ${currentStatus.color}`}>
               {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
+            <button onClick={rescreenCandidate}
+              className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-blue-700 transition-all">
+              🔄 Re-screen AI
+            </button>
           </div>
         </div>
+
+        {/* Skill match warning banner */}
+        {candidate.primarySkillMatch === false && (
+          <div className="mt-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-3">
+            <span className="text-red-500 text-xl">⚠️</span>
+            <div>
+              <p className="font-bold text-red-700 text-sm">Primary Skill Mismatch</p>
+              <p className="text-xs text-red-600">This candidate's primary skills do not match the required skill for this role. Score has been adjusted to reflect job fit.</p>
+            </div>
+            <span className="ml-auto text-xs bg-red-100 text-red-700 px-2 py-1 rounded-lg font-bold shrink-0">
+              Job Fit: {candidate.jobFitScore ?? score}/100
+            </span>
+          </div>
+        )}
+        {candidate.primarySkillMatch === true && (
+          <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2 flex items-center gap-2">
+            <span className="text-emerald-500">✅</span>
+            <p className="text-sm font-semibold text-emerald-700">Primary skill match confirmed</p>
+            {candidate.primarySkillScore && <span className="ml-auto text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg font-bold">Skill Score: {candidate.primarySkillScore}/100</span>}
+          </div>
+        )}
 
         {/* Status pipeline bar */}
         <div className="mt-4 flex items-center gap-1">

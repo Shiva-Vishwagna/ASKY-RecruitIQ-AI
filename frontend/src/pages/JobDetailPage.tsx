@@ -12,6 +12,8 @@ interface Candidate {
   tier: string; riskLevel: string; status?: string;
   appliedAt?: string; createdAt?: string;
   topSkills?: string[]; domain?: string; seniority?: string; experienceYears?: number;
+  primarySkillMatch?: boolean;
+  jobFitScore?: number;
   interviewQuestions?: string[];
   screeningAnswers?: { question: string; answer: string; aiScore?: number; aiFeedback?: string }[];
 }
@@ -203,8 +205,10 @@ export default function JobDetailPage() {
                         <span className="text-xs font-bold text-gray-600">{score}</span>
                       </div>
                     </div>
-                    <div className="mt-2">
+                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${stage.color}`}>{stage.label}</span>
+                      {c.primarySkillMatch === false && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">⚠ Mismatch</span>}
+                      {c.primarySkillMatch === true && <span className="text-xs bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full">✓ Match</span>}
                     </div>
                   </div>
                 );

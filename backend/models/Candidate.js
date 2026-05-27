@@ -14,6 +14,8 @@ const CandidateSchema = new mongoose.Schema({
   tier:            { type: String, default: "C-Tier" },
   riskLevel:       { type: String, default: "medium" },
   status:          { type: String, default: "new" },
+  uploadedBy:      { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  uploadedByName:  { type: String },
   summary:         { type: String },
 
   // Rich AI analysis fields

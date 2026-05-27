@@ -1,54 +1,86 @@
 const Groq = require('groq-sdk');
 
-const PROMPT_TEMPLATE = (jobTitle, rawText) => `You are an expert technical recruiter. Analyze this resume for the role: "${jobTitle || 'Software Engineer'}".
+const PROMPT_TEMPLATE = (jobContext, rawText) => {
+  const jobTitle      = typeof jobContext === 'string' ? jobContext : (jobContext.title || 'Software Engineer');
+  const primarySkill  = typeof jobContext === 'object' ? (jobContext.primarySkill || '') : '';
+  const requiredSkills = typeof jobContext === 'object' ? (jobContext.requiredSkills || []) : [];
+  const level         = typeof jobContext === 'object' ? (jobContext.level || '') : '';
 
-Return ONLY valid JSON with no extra text:
+  const skillMatchRules = primarySkill ? `
+CRITICAL SCORING RULES — APPLY STRICTLY:
+- Primary skill required: "${primarySkill}"
+- Required skills: ${requiredSkills.length ? requiredSkills.join(', ') : 'not specified'}
+- If the candidate does NOT have "${primarySkill}" as a primary skill, the aiScore MUST be 40 or below regardless of overall CV quality
+- If the candidate has "${primarySkill}" but is missing most other required skills, cap score at 65
+- Only give 75+ if candidate clearly has "${primarySkill}" AND most required skills
+- Only give 85+ if candidate is strong in "${primarySkill}" AND matches all required skills AND experience level
+- A strong Java developer applying for a React role is NOT a good match — score them low (30-45)
+- Be strict: job fit matters more than overall CV strength` : '';
+
+  return `You are an expert technical recruiter screening candidates for this specific role.
+
+Job Title: ${jobTitle}${level ? `
+Experience Level Required: ${level}` : ''}${primarySkill ? `
+Primary Skill Required: ${primarySkill}` : ''}${requiredSkills.length ? `
+Required Skills: ${requiredSkills.join(', ')}` : ''}
+${skillMatchRules}
+
+Analyze the resume below and return ONLY valid JSON with no extra text:
 {
   "name": "full name",
   "email": "email or empty string",
   "phone": "phone or empty string",
-  "domain": "primary tech domain e.g. Java Backend, React Frontend, DevOps",
+  "domain": "candidate primary tech domain e.g. Java Backend, React Frontend",
   "seniority": "Junior or Mid or Senior or Lead",
   "experience_years": 5,
   "topSkills": ["skill1","skill2","skill3","skill4","skill5"],
+  "primarySkillMatch": true,
+  "primarySkillScore": 85,
+  "jobFitScore": 60,
   "aiScore": 78,
   "tier": "A-Tier or B-Tier or C-Tier",
   "riskLevel": "low or medium or high",
-  "summary": "2-3 sentence overview",
-  "technicalExperience": "2-3 sentences about technical stack and projects",
-  "leadershipExperience": "1-2 sentences about leadership, or None mentioned",
-  "cloudExpertise": "1-2 sentences about cloud/infra, or None mentioned",
+  "summary": "2-3 sentence overview mentioning job fit",
+  "technicalExperience": "2-3 sentences about technical stack",
+  "leadershipExperience": "1-2 sentences or None mentioned",
+  "cloudExpertise": "1-2 sentences or None mentioned",
   "databases": ["PostgreSQL","MongoDB"],
   "frameworks": ["Spring Boot","React"],
   "tools": ["Docker","Jenkins","Git"],
   "projectDomains": ["Telecom","Banking"],
-  "strengths": ["strength 1","strength 2","strength 3"],
-  "gaps": ["gap 1","gap 2"],
-  "skillScores": [{"skill":"Java","score":85},{"skill":"Spring Boot","score":75}],
+  "strengths": ["strength 1 relevant to this role","strength 2"],
+  "gaps": ["gap 1 vs this role requirements","gap 2"],
+  "skillScores": [{"skill":"${primarySkill || 'Primary Skill'}","score":85},{"skill":"Secondary Skill","score":70}],
   "recommendation": "Strong Hire or Hire or Maybe or No Hire",
-  "recommendationReason": "2-3 sentence explanation"
+  "recommendationReason": "2-3 sentence explanation mentioning fit for ${jobTitle}"
 }
 
 Resume:
 ${rawText.slice(0, 4000)}`;
+};
 
 async function getProvidersFromDB() {
   try {
     const Settings = require('../models/Settings');
     const settings = await Settings.findOne();
     if (settings?.aiProviders?.length) {
-      return settings.aiProviders
-        .filter(p => p.enabled && p.apiKey)
+      const active = settings.aiProviders
+        .filter(p => p.enabled && (p.apiKey || p.provider === 'ollama'))
         .sort((a, b) => a.priority - b.priority);
+      if (active.length) {
+        console.log(`[AI] Found ${active.length} active providers in DB: ${active.map(p => p.name).join(', ')}`);
+        return active;
+      }
     }
   } catch (e) {
-    console.log('[AI] Could not load providers from DB, using env vars');
+    console.log('[AI] DB provider load failed:', e.message);
   }
+  console.log('[AI] No DB providers found, falling back to env vars');
   return null;
 }
 
-async function screenResumeWithAI(rawText, jobTitle) {
-  const prompt = PROMPT_TEMPLATE(jobTitle, rawText);
+async function screenResumeWithAI(rawText, jobContext) {
+  const prompt = PROMPT_TEMPLATE(jobContext, rawText);
 
   // Try DB-configured providers first
   const dbProviders = await getProvidersFromDB();

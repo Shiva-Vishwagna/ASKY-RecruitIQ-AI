@@ -34,11 +34,25 @@ router.post('/upload', protect, (req, res) => {
       const files = req.files || [];
       if (files.length === 0) return res.status(400).json({ message: 'No files uploaded.' });
 
+      // Fetch job details for accurate skill-match scoring
+      let job = null;
+      if (req.body.jobId) {
+        const Job = require('../models/Job');
+        job = await Job.findById(req.body.jobId).lean();
+      }
+      const jobContext = {
+        title:         job?.title || req.body.jobTitle || '',
+        primarySkill:  job?.primarySkill || '',
+        requiredSkills: job?.requiredSkills || [],
+        level:         job?.level || '',
+        minAiScore:    job?.minAiScore || 60,
+      };
+
       const results = [];
       for (const file of files) {
         try {
           const rawText = await extractText(file.buffer, file.mimetype);
-          const ai = await screenResumeWithAI(rawText, req.body.jobTitle || '');
+          const ai = await screenResumeWithAI(rawText, jobContext);
 
           const candidate = await Candidate.create({
             name:                 ai?.name || file.originalname.replace(/\.[^/.]+$/, ''),
@@ -54,6 +68,9 @@ router.post('/upload', protect, (req, res) => {
             tier:                 ai?.tier || 'C-Tier',
             riskLevel:            ai?.riskLevel || 'medium',
             summary:              ai?.summary || '',
+            primarySkillMatch:    ai?.primarySkillMatch ?? null,
+            primarySkillScore:    Number(ai?.primarySkillScore) || 0,
+            jobFitScore:          Number(ai?.jobFitScore) || 0,
             projectDomains:       ai?.projectDomains || [],
             technicalExperience:  ai?.technicalExperience || '',
             leadershipExperience: ai?.leadershipExperience || '',

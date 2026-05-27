@@ -8,17 +8,19 @@ const Groq = require('groq-sdk');
 // GET /api/candidates
 router.get('/', protect, async (req, res) => {
   try {
-    const candidates = await Candidate.find()
+    // Recruiters only see their own uploads; admins see all
+    const query = req.user.role === 'admin' ? {} : { uploadedBy: req.user._id };
+
+    const candidates = await Candidate.find(query)
       .populate('jobId', 'title department location')
       .sort({ createdAt: -1 });
 
-    // Enrich jobTitle from populated jobId if appliedFor is missing
     const enriched = candidates.map(c => {
       const obj = c.toObject();
       if (obj.jobId && typeof obj.jobId === 'object') {
-        obj.jobTitle = obj.appliedFor || obj.jobId.title || '';
+        obj.jobTitle      = obj.appliedFor || obj.jobId.title || '';
         obj.jobDepartment = obj.jobId.department || '';
-        obj.jobLocation = obj.jobId.location || '';
+        obj.jobLocation   = obj.jobId.location || '';
       } else {
         obj.jobTitle = obj.appliedFor || '';
       }
@@ -113,9 +115,12 @@ Return ONLY a JSON array of 8 question strings, no other text:
   }
 });
 
-// DELETE /api/candidates/:id
+// DELETE /api/candidates/:id — admin only
 router.delete('/:id', protect, async (req, res) => {
   try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Only admins can delete candidates.' });
+    }
     await Candidate.findByIdAndDelete(req.params.id);
     res.json({ message: 'Candidate removed' });
   } catch (err) {

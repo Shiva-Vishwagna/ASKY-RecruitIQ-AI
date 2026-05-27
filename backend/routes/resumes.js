@@ -67,6 +67,8 @@ router.post('/upload', protect, (req, res) => {
             recommendation:       ai?.recommendation || '',
             recommendationReason: ai?.recommendationReason || '',
             status:               'new',
+            uploadedBy:           req.user._id,
+            uploadedByName:       req.user.name,
           });
 
           await AuditLog.create({

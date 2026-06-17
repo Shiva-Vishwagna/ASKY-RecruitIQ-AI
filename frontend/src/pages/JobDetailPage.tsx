@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import ShareJobButton from "../components/ShareJobButton";
 
 interface Job {
   _id: string; title: string; department: string; location: string;
@@ -127,6 +128,13 @@ export default function JobDetailPage() {
           </div>
           <div className="flex items-center gap-3">
             <span className={`px-3 py-1 rounded-full text-sm font-semibold capitalize ${job.status === "open" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-600"}`}>{job.status}</span>
+            {/* ── Share JD Button ── */}
+            <ShareJobButton
+              jobId={id || ""}
+              jobTitle={job.title}
+              department={job.department}
+              location={job.location}
+            />
             <label className={`bg-blue-600 text-white px-4 py-2 rounded-xl font-semibold cursor-pointer hover:bg-blue-700 transition-all text-sm ${uploading ? "opacity-60 pointer-events-none" : ""}`}>
               {uploading ? "⏳ Uploading..." : "📎 Upload Resumes"}
               <input type="file" multiple accept=".pdf,.doc,.docx" onChange={handleResumeUpload} className="hidden" />
@@ -152,7 +160,6 @@ export default function JobDetailPage() {
         <div className="flex h-[calc(100vh-200px)]">
           {/* Left: Stage filter + candidate list */}
           <div className="w-80 border-r border-gray-100 bg-white flex flex-col shrink-0">
-            {/* Stage filter pills */}
             <div className="p-4 border-b border-gray-100">
               <button onClick={() => setStageFilter("all")}
                 className={`w-full text-left px-3 py-2 rounded-xl text-sm font-semibold mb-1 transition-all ${stageFilter === "all" ? "bg-slate-800 text-white" : "text-gray-600 hover:bg-gray-50"}`}>
@@ -173,7 +180,6 @@ export default function JobDetailPage() {
               })}
             </div>
 
-            {/* Candidate list */}
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {filteredCandidates.length === 0 ? (
                 <div className="text-center py-8 text-gray-400 text-sm">
@@ -216,7 +222,7 @@ export default function JobDetailPage() {
             </div>
           </div>
 
-          {/* Right: Candidate detail panel */}
+          {/* Right: Candidate detail panel OR job insights */}
           <div className="flex-1 overflow-y-auto">
             {selectedCandidate ? (
               <CandidatePanel
@@ -232,10 +238,82 @@ export default function JobDetailPage() {
                 }}
               />
             ) : (
-              <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                <div className="text-6xl mb-4">👈</div>
-                <p className="font-medium text-lg">Select a candidate to view details</p>
-                <p className="text-sm mt-1">Or upload resumes to add candidates</p>
+              /* ── Job Insights Panel (replaces empty state) ── */
+              <div className="p-6 space-y-5">
+                <h2 className="font-bold text-gray-700 text-sm uppercase tracking-wide">📊 Pipeline Summary</h2>
+                <div className="grid grid-cols-3 gap-3">
+                  {STAGES.map(s => {
+                    const count = candidates.filter(c => (c.status || "cv_uploaded") === s.value).length;
+                    return (
+                      <button key={s.value} onClick={() => setStageFilter(s.value)}
+                        className={`rounded-2xl p-4 text-center border-2 transition-all hover:scale-105 ${count > 0 ? s.color + " border-current/20 cursor-pointer" : "bg-gray-50 text-gray-300 border-gray-100 cursor-default"}`}>
+                        <div className="text-3xl font-black">{count}</div>
+                        <div className="text-xs font-semibold mt-1 leading-tight">{s.label}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Top Candidates */}
+                {candidates.length > 0 ? (
+                  <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                    <h3 className="font-bold text-gray-900 mb-4">🏆 Top Candidates by Score</h3>
+                    <div className="space-y-2">
+                      {[...candidates]
+                        .sort((a, b) => (b.aiScore||b.score||0) - (a.aiScore||a.score||0))
+                        .slice(0, 6)
+                        .map(c => {
+                          const score = c.aiScore || c.score || 0;
+                          const tierKey = c.tier?.replace(/-?Tier$/i, "");
+                          const stage = STAGES.find(s => s.value === (c.status || "cv_uploaded")) || STAGES[0];
+                          return (
+                            <div key={c._id} onClick={() => setSelectedCandidate(c)}
+                              className="flex items-center gap-3 p-3 rounded-xl hover:bg-blue-50 cursor-pointer border border-transparent hover:border-blue-100 transition-all">
+                              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
+                                {c.name?.charAt(0)?.toUpperCase()}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="font-semibold text-gray-900 text-sm truncate">{c.name}</div>
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${stage.color}`}>{stage.label}</span>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className={`text-sm font-black ${score >= 80 ? "text-emerald-600" : score >= 60 ? "text-blue-600" : "text-amber-600"}`}>{score}</div>
+                                <div className={`text-xs font-bold ${tierColors[tierKey] || "text-gray-400"}`}>{tierKey}-Tier</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400">
+                    <div className="text-5xl mb-3">📎</div>
+                    <p className="font-medium">No candidates yet</p>
+                    <p className="text-sm mt-1">Upload resumes or share the JD link to get applicants</p>
+                  </div>
+                )}
+
+                {/* Quick Stats */}
+                <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                  <h3 className="font-bold text-gray-900 mb-4">📈 Job Stats</h3>
+                  <div className="space-y-3">
+                    {[
+                      { label: "Total Candidates",  value: candidates.length },
+                      { label: "A-Tier Candidates", value: candidates.filter(c => c.tier?.includes("A")).length },
+                      { label: "Average Score",     value: candidates.length ? Math.round(candidates.reduce((a,c) => a + (c.aiScore||c.score||0), 0) / candidates.length) + "/100" : "—" },
+                      { label: "Min Required Score",value: `${job.minAiScore || 60}/100` },
+                      { label: "HM Ready",          value: candidates.filter(c => c.status === "hm_ready").length },
+                      { label: "Rejected",          value: candidates.filter(c => c.status === "rejected").length },
+                    ].map(s => (
+                      <div key={s.label} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+                        <span className="text-sm text-gray-500">{s.label}</span>
+                        <span className="text-sm font-bold text-gray-900">{s.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <p className="text-center text-gray-400 text-xs py-2">👈 Click a candidate on the left to view full details</p>
               </div>
             )}
           </div>
@@ -257,7 +335,6 @@ export default function JobDetailPage() {
               </ul>
             </div>
           )}
-          {/* Stats */}
           <div className="grid grid-cols-3 gap-4">
             {STAGES.filter(s => s.value !== "rejected").map(s => {
               const count = candidates.filter(c => (c.status || "cv_uploaded") === s.value).length;
@@ -275,7 +352,7 @@ export default function JobDetailPage() {
   );
 }
 
-// ─── Candidate Detail Panel ────────────────────────────────────────────────
+// ─── Candidate Detail Panel ───────────────────────────────────────────────
 interface PanelProps {
   candidate: Candidate; job: Job;
   API: string; token: string;
@@ -338,7 +415,6 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
 
   return (
     <div className="h-full flex flex-col">
-      {/* Candidate header */}
       <div className="bg-white border-b border-gray-100 p-5">
         <div className="flex items-start gap-4">
           <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${tierKey === "A" ? "from-emerald-400 to-emerald-600" : tierKey === "B" ? "from-blue-400 to-blue-600" : "from-amber-400 to-amber-600"} flex items-center justify-center text-white font-bold text-lg shrink-0`}>
@@ -363,9 +439,8 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
           </div>
         </div>
 
-        {/* Stage pipeline */}
         <div className="mt-4 flex items-center gap-1">
-          {STAGES.filter(s => s.value !== "rejected").map((s, i) => {
+          {STAGES.filter(s => s.value !== "rejected").map((s) => {
             const currentIdx = STAGES.findIndex(st => st.value === (candidate.status || "cv_uploaded"));
             const stageIdx = STAGES.findIndex(st => st.value === s.value);
             const isActive = stageIdx <= currentIdx;
@@ -378,7 +453,6 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
           })}
         </div>
 
-        {/* Action buttons */}
         <div className="flex gap-2 mt-4 flex-wrap">
           {!hasAnswers && questions.length === 0 && (candidate.status === "ai_screened" || candidate.status === "cv_uploaded") && (
             <button onClick={generateQuestions} disabled={generatingQ}
@@ -409,7 +483,6 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
         </div>
       </div>
 
-      {/* Panel tabs */}
       <div className="bg-white border-b border-gray-100 px-5">
         <div className="flex gap-5">
           {["profile", "screening", "result"].map(t => (
@@ -421,10 +494,7 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
         </div>
       </div>
 
-      {/* Panel content */}
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
-
-        {/* PROFILE */}
         {tab === "profile" && (
           <>
             <div className="bg-white rounded-2xl p-5 border border-gray-100">
@@ -458,7 +528,6 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
           </>
         )}
 
-        {/* SCREENING */}
         {tab === "screening" && (
           <>
             {questions.length === 0 ? (
@@ -500,7 +569,6 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
           </>
         )}
 
-        {/* RESULT */}
         {tab === "result" && (
           <>
             {!hasAnswers && !screeningResult ? (
@@ -511,31 +579,20 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
               </div>
             ) : (
               <>
-                {/* Score summary */}
                 <div className="bg-white rounded-2xl p-5 border border-gray-100">
                   <h3 className="font-bold text-gray-900 mb-4">Screening Results</h3>
                   <div className="grid grid-cols-3 gap-4 text-center mb-4">
+                    <div><div className="text-3xl font-black text-blue-600">{score}</div><div className="text-xs text-gray-500 mt-1">AI Resume Score</div></div>
+                    <div><div className="text-3xl font-black text-purple-600">{candidate.screeningScore ?? "—"}</div><div className="text-xs text-gray-500 mt-1">Screening Score</div></div>
                     <div>
-                      <div className="text-3xl font-black text-blue-600">{score}</div>
-                      <div className="text-xs text-gray-500 mt-1">AI Resume Score</div>
-                    </div>
-                    <div>
-                      <div className="text-3xl font-black text-purple-600">{candidate.screeningScore ?? "—"}</div>
-                      <div className="text-xs text-gray-500 mt-1">Screening Score</div>
-                    </div>
-                    <div>
-                      <div className="text-3xl font-black text-emerald-600">
-                        {candidate.screeningScore != null ? Math.round((score + candidate.screeningScore) / 2) : "—"}
-                      </div>
+                      <div className="text-3xl font-black text-emerald-600">{candidate.screeningScore != null ? Math.round((score + candidate.screeningScore) / 2) : "—"}</div>
                       <div className="text-xs text-gray-500 mt-1">Combined Score</div>
                     </div>
                   </div>
-                  <div className={`rounded-xl p-3 text-center font-bold text-sm ${(candidate.status === "hm_ready") ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                  <div className={`rounded-xl p-3 text-center font-bold text-sm ${candidate.status === "hm_ready" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
                     {candidate.status === "hm_ready" ? "🎉 HM Ready — Candidate passed screening!" : "📋 Under Review — Combined score below threshold"}
                   </div>
                 </div>
-
-                {/* Per-answer scores */}
                 {candidate.screeningAnswers?.map((sa, i) => (
                   <div key={i} className="bg-white rounded-xl p-5 border border-gray-100">
                     <div className="flex items-start justify-between mb-2">
@@ -550,8 +607,6 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
                     {sa.aiFeedback && <p className="text-xs text-gray-500 italic">💡 {sa.aiFeedback}</p>}
                   </div>
                 ))}
-
-                {/* Move to HM */}
                 {candidate.status !== "hm_ready" && (
                   <button onClick={() => onStatusChange("hm_ready")}
                     className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all">

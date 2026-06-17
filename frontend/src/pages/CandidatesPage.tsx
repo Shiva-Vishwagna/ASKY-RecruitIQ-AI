@@ -35,8 +35,8 @@ function getDaysInStage(candidate: Candidate): number {
 
 function getSLABadge(days: number, status?: string) {
   if (status === "rejected" || status === "hm_ready") return null;
-  if (days >= 7) return { label: `${days}d 🔴`, cls: "bg-red-100 text-red-700 border border-red-200", tip: "Urgent: Stuck 7+ days" };
-  if (days >= 5) return { label: `${days}d 🟡`, cls: "bg-amber-100 text-amber-700 border border-amber-200", tip: "Warning: Stuck 5+ days" };
+  if (days >= 7) return { label: `${days}d`, cls: "bg-red-100 text-red-700 border border-red-200", tip: "Critical: Stuck 7+ days" };
+  if (days >= 5) return { label: `${days}d`, cls: "bg-amber-100 text-amber-700 border border-amber-200", tip: "Warning: Stuck 5-6 days" };
   if (days >= 3) return { label: `${days}d`, cls: "bg-blue-50 text-blue-500 border border-blue-100", tip: `${days} days in this stage` };
   return null;
 }
@@ -60,10 +60,7 @@ function QuickPreviewPanel({
 
   return (
     <>
-      {/* Backdrop */}
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-
-      {/* Panel */}
       <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 flex flex-col overflow-hidden">
         {/* Panel Header */}
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-5 py-4 text-white shrink-0">
@@ -89,7 +86,6 @@ function QuickPreviewPanel({
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-
           {/* Key Info Row */}
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-gray-50 rounded-xl p-3 text-center">
@@ -145,7 +141,9 @@ function QuickPreviewPanel({
           <div>
             <div className="flex justify-between text-xs font-semibold mb-1">
               <span className="text-gray-500 uppercase tracking-wide">AI Score</span>
-              <span className={score >= 80 ? "text-emerald-600" : score >= 60 ? "text-blue-600" : "text-amber-600"}>{score >= 80 ? "🌟 Excellent" : score >= 60 ? "👍 Good" : "🔍 Needs Review"}</span>
+              <span className={score >= 80 ? "text-emerald-600" : score >= 60 ? "text-blue-600" : "text-amber-600"}>
+                {score >= 80 ? "🌟 Excellent" : score >= 60 ? "👍 Good" : "🔍 Needs Review"}
+              </span>
             </div>
             <div className="h-3 bg-gray-100 rounded-full">
               <div className={`h-3 rounded-full transition-all ${score >= 80 ? "bg-emerald-500" : score >= 60 ? "bg-blue-500" : "bg-amber-500"}`}
@@ -240,7 +238,7 @@ function QuickPreviewPanel({
           )}
         </div>
 
-        {/* Footer Actions */}
+        {/* Footer */}
         <div className="p-4 border-t border-gray-100 bg-gray-50 shrink-0">
           <button onClick={onViewFull}
             className="w-full bg-blue-600 text-white py-2.5 rounded-xl font-bold hover:bg-blue-700 transition-all text-sm">
@@ -252,7 +250,7 @@ function QuickPreviewPanel({
   );
 }
 
-// ── Main Candidates Page ──────────────────────────────────────
+// ── Main Page ─────────────────────────────────────────────────
 export default function CandidatesPage() {
   const navigate = useNavigate();
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -381,6 +379,12 @@ export default function CandidatesPage() {
     candidates.map(c => c.jobTitle || c.appliedFor || "").filter(Boolean)
   )).sort();
 
+  // ── SLA Counts (3 distinct buckets) ──────────────────────────
+  const activeCandidates = candidates.filter(c => c.status !== "rejected" && c.status !== "hm_ready");
+  const stuck7Count    = activeCandidates.filter(c => getDaysInStage(c) >= 7).length;
+  const stuck5to6Count = activeCandidates.filter(c => getDaysInStage(c) >= 5 && getDaysInStage(c) < 7).length;
+  const onTrackCount   = activeCandidates.filter(c => getDaysInStage(c) < 5).length;
+
   const filtered = candidates
     .filter(c => {
       const s = (c.aiScore||c.score||0);
@@ -396,8 +400,9 @@ export default function CandidatesPage() {
       const matchDateFrom = !dateFrom || (dateStr && new Date(dateStr) >= new Date(dateFrom));
       const matchDateTo   = !dateTo   || (dateStr && new Date(dateStr) <= new Date(dateTo + "T23:59:59"));
       const matchSLA      = slaFilter === "all" ? true
-        : slaFilter === "stuck7" ? (days >= 7 && c.status !== "rejected" && c.status !== "hm_ready")
-        : slaFilter === "stuck5" ? (days >= 5 && c.status !== "rejected" && c.status !== "hm_ready")
+        : slaFilter === "stuck7"  ? (days >= 7 && c.status !== "rejected" && c.status !== "hm_ready")
+        : slaFilter === "stuck5"  ? (days >= 5 && days < 7 && c.status !== "rejected" && c.status !== "hm_ready")
+        : slaFilter === "ontrack" ? (days < 5 && c.status !== "rejected" && c.status !== "hm_ready")
         : true;
       return matchSearch && matchJob && matchTier && matchRisk && matchStatus && matchScore && matchDateFrom && matchDateTo && matchSLA;
     })
@@ -417,8 +422,6 @@ export default function CandidatesPage() {
   ].filter(Boolean).length;
 
   const getStatusInfo = (status?: string) => STATUSES.find(s => s.value === (status || "cv_uploaded")) || STATUSES[0];
-  const stuck7Count = candidates.filter(c => getDaysInStage(c) >= 7 && c.status !== "rejected" && c.status !== "hm_ready").length;
-  const stuck5Count = candidates.filter(c => getDaysInStage(c) >= 5 && c.status !== "rejected" && c.status !== "hm_ready").length;
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -445,26 +448,38 @@ export default function CandidatesPage() {
         </div>
       </div>
 
-      {/* SLA Alert Bar */}
-      {(stuck7Count > 0 || stuck5Count > 0) && (
-        <div className="mb-4 flex gap-3 flex-wrap">
-          {stuck7Count > 0 && (
-            <button onClick={() => setSlaFilter("stuck7")}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-semibold transition-all ${slaFilter === "stuck7" ? "bg-red-600 text-white border-red-600" : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"}`}>
-              🔴 {stuck7Count} stuck 7+ days — Urgent
-            </button>
-          )}
-          {stuck5Count > 0 && (
-            <button onClick={() => setSlaFilter("stuck5")}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-semibold transition-all ${slaFilter === "stuck5" ? "bg-amber-600 text-white border-amber-600" : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"}`}>
-              🟡 {stuck5Count} stuck 5+ days — Review
-            </button>
-          )}
+      {/* ── SLA Overview Bar (3 distinct buckets) ── */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-sm font-bold text-gray-700">⏱️ SLA Overview</span>
           {slaFilter !== "all" && (
-            <button onClick={() => setSlaFilter("all")} className="text-sm text-gray-500 hover:text-gray-700 px-3 py-2">✕ Clear SLA filter</button>
+            <button onClick={() => setSlaFilter("all")} className="text-xs text-gray-400 hover:text-gray-600 font-medium">✕ Clear filter</button>
           )}
         </div>
-      )}
+        <div className="grid grid-cols-3 gap-3">
+          {/* Critical */}
+          <button onClick={() => setSlaFilter(slaFilter === "stuck7" ? "all" : "stuck7")}
+            className={`rounded-xl p-3 border-2 transition-all text-left ${slaFilter === "stuck7" ? "border-red-500 bg-red-50" : "border-red-100 bg-red-50 hover:border-red-300"}`}>
+            <div className="text-2xl font-black text-red-600">{stuck7Count}</div>
+            <div className="text-xs font-bold text-red-700 mt-0.5">🔴 Critical</div>
+            <div className="text-xs text-red-400">Stuck 7+ days</div>
+          </button>
+          {/* Warning */}
+          <button onClick={() => setSlaFilter(slaFilter === "stuck5" ? "all" : "stuck5")}
+            className={`rounded-xl p-3 border-2 transition-all text-left ${slaFilter === "stuck5" ? "border-amber-500 bg-amber-50" : "border-amber-100 bg-amber-50 hover:border-amber-300"}`}>
+            <div className="text-2xl font-black text-amber-600">{stuck5to6Count}</div>
+            <div className="text-xs font-bold text-amber-700 mt-0.5">🟡 Warning</div>
+            <div className="text-xs text-amber-400">Stuck 5–6 days</div>
+          </button>
+          {/* On Track */}
+          <button onClick={() => setSlaFilter(slaFilter === "ontrack" ? "all" : "ontrack")}
+            className={`rounded-xl p-3 border-2 transition-all text-left ${slaFilter === "ontrack" ? "border-emerald-500 bg-emerald-50" : "border-emerald-100 bg-emerald-50 hover:border-emerald-300"}`}>
+            <div className="text-2xl font-black text-emerald-600">{onTrackCount}</div>
+            <div className="text-xs font-bold text-emerald-700 mt-0.5">🟢 On Track</div>
+            <div className="text-xs text-emerald-400">Less than 5 days</div>
+          </button>
+        </div>
+      </div>
 
       {/* Bulk Action Bar */}
       {selectedIds.size > 0 && (
@@ -566,12 +581,13 @@ export default function CandidatesPage() {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">SLA / Stuck</label>
+              <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">SLA Filter</label>
               <select value={slaFilter} onChange={e => setSlaFilter(e.target.value)}
                 className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="all">All</option>
-                <option value="stuck5">Stuck 5+ days</option>
-                <option value="stuck7">Stuck 7+ days (Urgent)</option>
+                <option value="stuck7">🔴 Critical (7+ days)</option>
+                <option value="stuck5">🟡 Warning (5-6 days)</option>
+                <option value="ontrack">🟢 On Track (&lt;5 days)</option>
               </select>
             </div>
             <div className="col-span-2">
@@ -645,7 +661,6 @@ export default function CandidatesPage() {
                       <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(c._id)}
                         className="rounded accent-blue-600 cursor-pointer" />
                     </td>
-                    {/* Candidate name — click opens preview */}
                     <td className="px-4 py-3.5 cursor-pointer" onClick={() => setPreviewCandidate(c)}>
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-bold shrink-0">

@@ -9,40 +9,54 @@ interface Job {
 }
 
 const statusColors: Record<string, string> = {
-  open: "bg-emerald-100 text-emerald-700 border border-emerald-200",
-  closed: "bg-red-100 text-red-700 border border-red-200",
-  "on-hold": "bg-amber-100 text-amber-700 border border-amber-200",
+  open:     "bg-emerald-100 text-emerald-700 border border-emerald-200",
+  closed:   "bg-red-100 text-red-700 border border-red-200",
+  "on-hold":"bg-amber-100 text-amber-700 border border-amber-200",
 };
+
+const statusOptions = [
+  { value: "open",    label: "Open",    icon: "🟢" },
+  { value: "on-hold", label: "On Hold", icon: "🟡" },
+  { value: "closed",  label: "Closed",  icon: "🔴" },
+];
 
 const SKILL_SUGGESTIONS = ["Java","Python","React","Node.js","Spring Boot","Angular","Vue","TypeScript","Docker","Kubernetes","AWS","Azure","PostgreSQL","MongoDB","Redis","Microservices","REST API","GraphQL","CI/CD","Git"];
 
 export default function JobsPage() {
   const navigate = useNavigate();
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
+  const [jobs, setJobs]               = useState<Job[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [search, setSearch]           = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [showModal, setShowModal] = useState(false);
-  const [skillInput, setSkillInput] = useState("");
-  const [newJob, setNewJob] = useState({
+  const [showModal, setShowModal]     = useState(false);
+  const [skillInput, setSkillInput]   = useState("");
+  const [newJob, setNewJob]           = useState({
     title: "", department: "", location: "", description: "",
     primarySkill: "", level: "Mid", requiredSkills: [] as string[], minAiScore: 60,
   });
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating]       = useState(false);
 
-  // Inline title edit states
-  const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
+  // Inline title edit
+  const [editingTitleId, setEditingTitleId]       = useState<string | null>(null);
   const [editingTitleValue, setEditingTitleValue] = useState("");
-  const [savingTitle, setSavingTitle] = useState(false);
+  const [savingTitle, setSavingTitle]             = useState(false);
 
-  const API = "https://asky-recruitiq-ai.onrender.com/api";
+  // Status change dropdown
+  const [statusMenuId, setStatusMenuId]   = useState<string | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
+
+  const API   = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
-
-  // Check if current user is admin
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const user  = JSON.parse(localStorage.getItem("user") || "{}");
   const isAdmin = user?.role === "admin";
 
-  useEffect(() => { fetchJobs(); }, []);
+  useEffect(() => {
+    fetchJobs();
+    // Close status menu on outside click
+    const handler = () => setStatusMenuId(null);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, []);
 
   async function fetchJobs() {
     try {
@@ -70,7 +84,6 @@ export default function JobsPage() {
     } finally { setCreating(false); }
   }
 
-  // Save edited title
   async function saveTitle(jobId: string) {
     if (!editingTitleValue.trim()) return;
     setSavingTitle(true);
@@ -83,21 +96,30 @@ export default function JobsPage() {
       if (res.ok) {
         setJobs(jobs.map(j => j._id === jobId ? { ...j, title: editingTitleValue.trim() } : j));
         setEditingTitleId(null);
-      } else {
-        alert("Failed to update title. Please try again.");
-      }
-    } catch {
-      alert("Error updating title.");
-    } finally {
-      setSavingTitle(false);
-    }
+      } else { alert("Failed to update title."); }
+    } catch { alert("Error updating title."); }
+    finally { setSavingTitle(false); }
+  }
+
+  async function updateJobStatus(jobId: string, newStatus: string) {
+    setUpdatingStatus(jobId);
+    setStatusMenuId(null);
+    try {
+      const res = await fetch(`${API}/jobs/${jobId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        setJobs(jobs.map(j => j._id === jobId ? { ...j, status: newStatus as Job["status"] } : j));
+      } else { alert("Failed to update status."); }
+    } catch { alert("Error updating status."); }
+    finally { setUpdatingStatus(null); }
   }
 
   function addSkill(skill: string) {
     const s = skill.trim();
-    if (s && !newJob.requiredSkills.includes(s)) {
-      setNewJob({ ...newJob, requiredSkills: [...newJob.requiredSkills, s] });
-    }
+    if (s && !newJob.requiredSkills.includes(s)) setNewJob({ ...newJob, requiredSkills: [...newJob.requiredSkills, s] });
     setSkillInput("");
   }
 
@@ -113,6 +135,9 @@ export default function JobsPage() {
 
   const levelScores: Record<string, number> = { Junior: 40, Mid: 60, Senior: 75, Lead: 85 };
 
+  // Count by status
+  const counts = { all: jobs.length, open: jobs.filter(j=>j.status==="open").length, closed: jobs.filter(j=>j.status==="closed").length, "on-hold": jobs.filter(j=>j.status==="on-hold").length };
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="flex items-center justify-between mb-8">
@@ -125,13 +150,18 @@ export default function JobsPage() {
         </button>
       </div>
 
-      <div className="flex gap-3 mb-6 flex-wrap">
+      {/* Search + Filter */}
+      <div className="flex gap-3 mb-6 flex-wrap items-center">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search jobs..."
           className="border border-gray-200 rounded-xl px-4 py-2 w-72 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
-        {["all", "open", "closed", "on-hold"].map(s => (
+        {(["all","open","on-hold","closed"] as const).map(s => (
           <button key={s} onClick={() => setStatusFilter(s)}
-            className={`px-4 py-2 rounded-xl font-medium capitalize transition-all ${statusFilter === s ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-blue-400"}`}>
-            {s === "all" ? "All Jobs" : s}
+            className={`px-4 py-2 rounded-xl font-medium capitalize transition-all flex items-center gap-1.5 ${statusFilter === s ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:border-blue-400"}`}>
+            {s === "open" ? "🟢" : s === "on-hold" ? "🟡" : s === "closed" ? "🔴" : ""}
+            {s === "all" ? "All Jobs" : s === "on-hold" ? "On Hold" : s.charAt(0).toUpperCase()+s.slice(1)}
+            <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ml-1 ${statusFilter === s ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500"}`}>
+              {counts[s]}
+            </span>
           </button>
         ))}
       </div>
@@ -153,65 +183,85 @@ export default function JobsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map(job => (
             <div key={job._id}
-              className="bg-white rounded-2xl p-6 border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all group">
+              className={`bg-white rounded-2xl p-6 border transition-all group relative ${
+                job.status === "closed" ? "border-red-100 opacity-80" :
+                job.status === "on-hold" ? "border-amber-100" :
+                "border-gray-100 hover:border-blue-300 hover:shadow-md"
+              }`}>
+
+              {/* ── Card Header ── */}
               <div className="flex items-start justify-between mb-3">
 
-                {/* INLINE TITLE EDIT — admin only */}
+                {/* Title with inline edit */}
                 {isAdmin && editingTitleId === job._id ? (
                   <div className="flex items-center gap-2 flex-1 mr-2" onClick={e => e.stopPropagation()}>
-                    <input
-                      autoFocus
-                      value={editingTitleValue}
+                    <input autoFocus value={editingTitleValue}
                       onChange={e => setEditingTitleValue(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === "Enter") saveTitle(job._id);
-                        if (e.key === "Escape") setEditingTitleId(null);
-                      }}
-                      className="border border-blue-400 rounded-lg px-2 py-1 text-sm font-bold text-gray-900 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <button
-                      onClick={() => saveTitle(job._id)}
-                      disabled={savingTitle}
-                      className="text-xs bg-blue-600 text-white px-2 py-1 rounded-lg hover:bg-blue-700 shrink-0"
-                    >
+                      onKeyDown={e => { if (e.key === "Enter") saveTitle(job._id); if (e.key === "Escape") setEditingTitleId(null); }}
+                      className="border border-blue-400 rounded-lg px-2 py-1 text-sm font-bold text-gray-900 w-full focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <button onClick={() => saveTitle(job._id)} disabled={savingTitle}
+                      className="text-xs bg-blue-600 text-white px-2 py-1 rounded-lg hover:bg-blue-700 shrink-0">
                       {savingTitle ? "..." : "✓"}
                     </button>
-                    <button
-                      onClick={() => setEditingTitleId(null)}
-                      className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-lg hover:bg-gray-200 shrink-0"
-                    >
-                      ✕
-                    </button>
+                    <button onClick={() => setEditingTitleId(null)}
+                      className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-lg hover:bg-gray-200 shrink-0">✕</button>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 flex-1 mr-2">
-                    <h3
-                      className="font-bold text-gray-900 text-lg leading-tight group-hover:text-blue-600 transition-colors cursor-pointer"
-                      onClick={() => navigate(`/jobs/${job._id}`)}
-                    >
+                    <h3 className="font-bold text-gray-900 text-lg leading-tight group-hover:text-blue-600 transition-colors cursor-pointer"
+                      onClick={() => navigate(`/jobs/${job._id}`)}>
                       {job.title}
                     </h3>
-                    {/* Edit pencil — only for admin */}
                     {isAdmin && (
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          setEditingTitleId(job._id);
-                          setEditingTitleValue(job.title);
-                        }}
+                      <button onClick={e => { e.stopPropagation(); setEditingTitleId(job._id); setEditingTitleValue(job.title); }}
                         title="Edit title"
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-600 shrink-0"
-                      >
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-600 shrink-0">
                         ✏️
                       </button>
                     )}
                   </div>
                 )}
 
-                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize shrink-0 ${statusColors[job.status]}`}>{job.status}</span>
+                {/* ── Status Badge with dropdown ── */}
+                <div className="relative shrink-0" onClick={e => e.stopPropagation()}>
+                  <button
+                    onClick={e => { e.stopPropagation(); setStatusMenuId(statusMenuId === job._id ? null : job._id); }}
+                    disabled={updatingStatus === job._id}
+                    className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize flex items-center gap-1 transition-all hover:opacity-80 ${statusColors[job.status]}`}>
+                    {updatingStatus === job._id ? (
+                      <span className="animate-spin">⏳</span>
+                    ) : (
+                      <>
+                        {job.status === "open" ? "🟢" : job.status === "on-hold" ? "🟡" : "🔴"}
+                        {job.status === "on-hold" ? "On Hold" : job.status}
+                        <span className="text-xs opacity-60">▾</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Status dropdown menu */}
+                  {statusMenuId === job._id && (
+                    <div className="absolute right-0 top-8 z-50 bg-white rounded-2xl shadow-2xl border border-gray-100 p-2 w-44">
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 pb-2">Change Status</p>
+                      {statusOptions.map(opt => (
+                        <button key={opt.value}
+                          onClick={() => updateJobStatus(job._id, opt.value)}
+                          className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all text-left ${
+                            job.status === opt.value
+                              ? "bg-blue-50 text-blue-700"
+                              : "text-gray-600 hover:bg-gray-50"
+                          }`}>
+                          <span>{opt.icon}</span>
+                          <span>{opt.label}</span>
+                          {job.status === opt.value && <span className="ml-auto text-blue-500 text-xs">✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Rest of card — clicking navigates */}
+              {/* Card body */}
               <div onClick={() => editingTitleId !== job._id && navigate(`/jobs/${job._id}`)} className="cursor-pointer">
                 <div className="space-y-1.5 text-sm text-gray-500">
                   <div className="flex items-center gap-2">🏢 <span>{job.department}</span></div>
@@ -230,7 +280,13 @@ export default function JobsPage() {
                 )}
                 <div className="mt-4 pt-4 border-t border-gray-50 flex items-center justify-between">
                   <span className="bg-blue-50 text-blue-700 text-sm font-semibold px-3 py-1 rounded-full">{job.candidateCount || 0} candidates</span>
-                  <span className="text-blue-500 text-sm font-medium group-hover:underline">View →</span>
+                  {job.status === "closed" ? (
+                    <span className="text-red-400 text-xs font-semibold">Position Closed</span>
+                  ) : job.status === "on-hold" ? (
+                    <span className="text-amber-500 text-xs font-semibold">Hiring Paused</span>
+                  ) : (
+                    <span className="text-blue-500 text-sm font-medium group-hover:underline">View →</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -270,7 +326,6 @@ export default function JobsPage() {
                   rows={3} placeholder="Paste job description..."
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
               </div>
-
               <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
                 <h3 className="font-bold text-blue-800 mb-3">⚙️ Level Engine</h3>
                 <div className="mb-4">
@@ -320,8 +375,7 @@ export default function JobsPage() {
                     <div className="flex flex-wrap gap-2">
                       {newJob.requiredSkills.map(s => (
                         <span key={s} className="bg-blue-100 text-blue-700 text-xs font-medium px-3 py-1 rounded-full flex items-center gap-1.5">
-                          {s}
-                          <button onClick={() => removeSkill(s)} className="text-blue-400 hover:text-red-500 font-bold">×</button>
+                          {s}<button onClick={() => removeSkill(s)} className="text-blue-400 hover:text-red-500 font-bold">×</button>
                         </span>
                       ))}
                     </div>
@@ -329,7 +383,6 @@ export default function JobsPage() {
                 </div>
               </div>
             </div>
-
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowModal(false)} className="flex-1 border border-gray-200 py-2.5 rounded-xl font-semibold text-gray-600 hover:bg-gray-50 transition-all">Cancel</button>
               <button onClick={createJob} disabled={creating} className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-all disabled:opacity-60">

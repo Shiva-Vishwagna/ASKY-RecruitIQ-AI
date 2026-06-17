@@ -30,8 +30,17 @@ export default function JobsPage() {
   });
   const [creating, setCreating] = useState(false);
 
+  // Inline title edit states
+  const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
+  const [editingTitleValue, setEditingTitleValue] = useState("");
+  const [savingTitle, setSavingTitle] = useState(false);
+
   const API = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
+
+  // Check if current user is admin
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const isAdmin = user?.role === "admin";
 
   useEffect(() => { fetchJobs(); }, []);
 
@@ -59,6 +68,29 @@ export default function JobsPage() {
         fetchJobs();
       }
     } finally { setCreating(false); }
+  }
+
+  // Save edited title
+  async function saveTitle(jobId: string) {
+    if (!editingTitleValue.trim()) return;
+    setSavingTitle(true);
+    try {
+      const res = await fetch(`${API}/jobs/${jobId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ title: editingTitleValue.trim() }),
+      });
+      if (res.ok) {
+        setJobs(jobs.map(j => j._id === jobId ? { ...j, title: editingTitleValue.trim() } : j));
+        setEditingTitleId(null);
+      } else {
+        alert("Failed to update title. Please try again.");
+      }
+    } catch {
+      alert("Error updating title.");
+    } finally {
+      setSavingTitle(false);
+    }
   }
 
   function addSkill(skill: string) {
@@ -120,37 +152,93 @@ export default function JobsPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map(job => (
-            <div key={job._id} onClick={() => navigate(`/jobs/${job._id}`)}
-              className="bg-white rounded-2xl p-6 border border-gray-100 hover:border-blue-300 hover:shadow-md cursor-pointer transition-all group">
+            <div key={job._id}
+              className="bg-white rounded-2xl p-6 border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all group">
               <div className="flex items-start justify-between mb-3">
-                <h3 className="font-bold text-gray-900 text-lg leading-tight group-hover:text-blue-600 transition-colors">{job.title}</h3>
-                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ml-2 shrink-0 ${statusColors[job.status]}`}>{job.status}</span>
+
+                {/* INLINE TITLE EDIT — admin only */}
+                {isAdmin && editingTitleId === job._id ? (
+                  <div className="flex items-center gap-2 flex-1 mr-2" onClick={e => e.stopPropagation()}>
+                    <input
+                      autoFocus
+                      value={editingTitleValue}
+                      onChange={e => setEditingTitleValue(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") saveTitle(job._id);
+                        if (e.key === "Escape") setEditingTitleId(null);
+                      }}
+                      className="border border-blue-400 rounded-lg px-2 py-1 text-sm font-bold text-gray-900 w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      onClick={() => saveTitle(job._id)}
+                      disabled={savingTitle}
+                      className="text-xs bg-blue-600 text-white px-2 py-1 rounded-lg hover:bg-blue-700 shrink-0"
+                    >
+                      {savingTitle ? "..." : "✓"}
+                    </button>
+                    <button
+                      onClick={() => setEditingTitleId(null)}
+                      className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-lg hover:bg-gray-200 shrink-0"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 flex-1 mr-2">
+                    <h3
+                      className="font-bold text-gray-900 text-lg leading-tight group-hover:text-blue-600 transition-colors cursor-pointer"
+                      onClick={() => navigate(`/jobs/${job._id}`)}
+                    >
+                      {job.title}
+                    </h3>
+                    {/* Edit pencil — only for admin */}
+                    {isAdmin && (
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          setEditingTitleId(job._id);
+                          setEditingTitleValue(job.title);
+                        }}
+                        title="Edit title"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-600 shrink-0"
+                      >
+                        ✏️
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize shrink-0 ${statusColors[job.status]}`}>{job.status}</span>
               </div>
-              <div className="space-y-1.5 text-sm text-gray-500">
-                <div className="flex items-center gap-2">🏢 <span>{job.department}</span></div>
-                <div className="flex items-center gap-2">📍 <span>{job.location || "Remote"}</span></div>
-                {job.level && <div className="flex items-center gap-2">🎯 <span>{job.level} Level</span></div>}
-                {(job as any).primarySkill && <div className="flex items-center gap-2">🔑 <span>Primary: {(job as any).primarySkill}</span></div>}
-                {job.minAiScore ? <div className="flex items-center gap-2">⭐ <span>Min Score: {job.minAiScore}</span></div> : null}
-              </div>
-              {(job.requiredSkills?.length ?? 0) > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1">
-                  {job.requiredSkills!.slice(0, 4).map(s => (
-                    <span key={s} className="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded-full">{s}</span>
-                  ))}
-                  {(job.requiredSkills!.length > 4) && <span className="text-xs text-gray-400">+{job.requiredSkills!.length - 4}</span>}
+
+              {/* Rest of card — clicking navigates */}
+              <div onClick={() => editingTitleId !== job._id && navigate(`/jobs/${job._id}`)} className="cursor-pointer">
+                <div className="space-y-1.5 text-sm text-gray-500">
+                  <div className="flex items-center gap-2">🏢 <span>{job.department}</span></div>
+                  <div className="flex items-center gap-2">📍 <span>{job.location || "Remote"}</span></div>
+                  {job.level && <div className="flex items-center gap-2">🎯 <span>{job.level} Level</span></div>}
+                  {(job as any).primarySkill && <div className="flex items-center gap-2">🔑 <span>Primary: {(job as any).primarySkill}</span></div>}
+                  {job.minAiScore ? <div className="flex items-center gap-2">⭐ <span>Min Score: {job.minAiScore}</span></div> : null}
                 </div>
-              )}
-              <div className="mt-4 pt-4 border-t border-gray-50 flex items-center justify-between">
-                <span className="bg-blue-50 text-blue-700 text-sm font-semibold px-3 py-1 rounded-full">{job.candidateCount || 0} candidates</span>
-                <span className="text-blue-500 text-sm font-medium group-hover:underline">View →</span>
+                {(job.requiredSkills?.length ?? 0) > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1">
+                    {job.requiredSkills!.slice(0, 4).map(s => (
+                      <span key={s} className="bg-blue-50 text-blue-600 text-xs px-2 py-0.5 rounded-full">{s}</span>
+                    ))}
+                    {(job.requiredSkills!.length > 4) && <span className="text-xs text-gray-400">+{job.requiredSkills!.length - 4}</span>}
+                  </div>
+                )}
+                <div className="mt-4 pt-4 border-t border-gray-50 flex items-center justify-between">
+                  <span className="bg-blue-50 text-blue-700 text-sm font-semibold px-3 py-1 rounded-full">{job.candidateCount || 0} candidates</span>
+                  <span className="text-blue-500 text-sm font-medium group-hover:underline">View →</span>
+                </div>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Create Job Modal with Level Engine */}
+      {/* Create Job Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-8 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -183,7 +271,6 @@ export default function JobsPage() {
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
               </div>
 
-              {/* Level Engine section */}
               <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
                 <h3 className="font-bold text-blue-800 mb-3">⚙️ Level Engine</h3>
                 <div className="mb-4">
@@ -212,7 +299,6 @@ export default function JobsPage() {
                       className="w-full border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
                   </div>
                 </div>
-
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Required Skills</label>
                   <div className="flex gap-2 mb-2">
@@ -222,7 +308,6 @@ export default function JobsPage() {
                       className="flex-1 border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
                     <button onClick={() => addSkill(skillInput)} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold">Add</button>
                   </div>
-                  {/* Quick add suggestions */}
                   <div className="flex flex-wrap gap-1.5 mb-2">
                     {SKILL_SUGGESTIONS.filter(s => !newJob.requiredSkills.includes(s)).slice(0, 10).map(s => (
                       <button key={s} onClick={() => addSkill(s)}

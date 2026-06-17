@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import RecruiterBot from './RecruiterBot';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -78,6 +79,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
         <div className="flex-1 overflow-y-auto">{children}</div>
       </div>
+
+      {/* Recruiter Bot — appears on every page */}
+      <RecruiterBot />
     </div>
   );
 }

@@ -197,82 +197,51 @@ export default function JobDetailPage() {
   async function handleFileImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setImporting(true);
 
-    async function extractDocxText(buffer: ArrayBuffer): Promise<string> {
-      // Load JSZip from CDN if not already present
-      if (!(window as any).JSZip) {
-        await new Promise<void>((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
-          s.onload = () => resolve();
-          s.onerror = () => reject(new Error("JSZip CDN failed"));
-          document.head.appendChild(s);
-        });
-      }
-      const zip     = await (window as any).JSZip.loadAsync(buffer);
-      const xmlFile = zip.file("word/document.xml");
-      if (!xmlFile) throw new Error("word/document.xml not found in docx");
-      const xml = await xmlFile.async("string");
-      // Strip XML tags and decode entities
-      return xml
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&apos;/g, "'")
-        .replace(/&quot;/g, """)
-        .replace(/&#x[0-9a-fA-F]+;/g, " ")
-        .replace(/&#[0-9]+;/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+    const fname = file.name.toLowerCase();
+    if (!fname.endsWith(".docx") && !fname.endsWith(".txt")) {
+      alert("Only .docx and .txt files are supported.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
     }
 
+    setImporting(true);
     try {
-      let text = "";
+      // Upload to backend — server uses mammoth for DOCX (reliable, no browser issues)
+      const formData = new FormData();
+      formData.append("file", file);
 
-      if (file.name.endsWith(".txt")) {
-        text = await file.text();
+      const res = await fetch(`${API}/jobs/${id}/question-bank/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
 
-      } else if (file.name.endsWith(".docx")) {
-        const buffer = await file.arrayBuffer();
-        text = await extractDocxText(buffer);
+      const data = await res.json();
 
-      } else if (file.name.endsWith(".doc")) {
-        alert("Old .doc format is not supported.\nPlease open the file in Word, go to File → Save As → .docx or .txt, then upload again.");
-        setImporting(false);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-        return;
-
-      } else {
-        text = await file.text();
-      }
-
-      if (!text || text.trim().length < 10) {
-        alert("Could not extract text from this file. Try saving as .txt instead.");
-        setImporting(false);
-        if (fileInputRef.current) fileInputRef.current.value = "";
+      if (!res.ok) {
+        alert(data.message || "Failed to parse file. Try saving as .txt with one question per line.");
         return;
       }
 
-      const parsed = parseQuestionsFromText(text);
+      const parsed: string[] = data.questions || [];
       if (parsed.length === 0) {
-        alert("No questions found in this file.\n\nSupported formats:\n• Word (.docx): Questions as 'Question: [text] Answer: [text]' OR one question per line\n• Text (.txt): One question per line");
-        setImporting(false);
-        if (fileInputRef.current) fileInputRef.current.value = "";
+        alert("No questions found in this file.\n\nSupported formats:\n• Word (.docx): 'Question: [text] Answer: [text]' OR one question per line\n• Text (.txt): One question per line");
         return;
       }
+
       setImportPreview(parsed);
       setShowImportPreview(true);
 
     } catch (err: any) {
       console.error("File import error:", err);
-      alert("Could not read this file.\n\nError: " + (err?.message || "Unknown error") + "\n\nTip: Save your questions as a .txt file with one question per line.");
+      alert("Upload failed: " + (err?.message || "Unknown error") + "\n\nMake sure the backend is running.");
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
+
 
   function confirmImport() {
     const remaining = 20 - questionBank.length;
@@ -566,15 +535,15 @@ export default function JobDetailPage() {
             {/* Option 1: Upload Word/Text file */}
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
               <h3 className="font-bold text-gray-900 mb-1">📁 Upload from File</h3>
-              <p className="text-xs text-gray-400 mb-4">Upload a Word (.docx) or Text (.txt) file — one question per line</p>
+              <p className="text-xs text-gray-400 mb-4">Upload a Word (.docx) or Text (.txt) file. Questions extracted on server — no browser issues.</p>
               <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl p-6 text-center hover:border-blue-300 transition-all">
                 <input ref={fileInputRef} type="file" accept=".txt,.docx" onChange={handleFileImport} className="hidden" id="question-file-input"/>
                 <label htmlFor="question-file-input" className="cursor-pointer">
                   <div className="text-3xl mb-2">📄</div>
-                  <p className="text-sm font-semibold text-gray-700">{importing ? "Reading file..." : "Click to choose file"}</p>
-                  <p className="text-xs text-gray-400 mt-1">Supports .docx and .txt</p>
+                  <p className="text-sm font-semibold text-gray-700">{importing ? "⏳ Uploading to server..." : "Click to choose file"}</p>
+                  <p className="text-xs text-gray-400 mt-1">Supports .docx and .txt · Parsed server-side</p>
                   <div className="mt-3 bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold inline-block hover:bg-blue-700 transition-all">
-                    {importing ? "⏳ Reading..." : "📁 Choose File"}
+                    {importing ? "⏳ Processing..." : "📁 Choose File"}
                   </div>
                 </label>
               </div>

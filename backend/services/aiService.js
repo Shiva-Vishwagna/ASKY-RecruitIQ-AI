@@ -1,63 +1,66 @@
 const Groq = require('groq-sdk');
 
-// ── Enhanced CV scoring prompt with 6 weighted criteria ──────
+// ── CV Scoring: ONLY skills match + stability ─────────────────
+// As per HM/Recruiter logic: what matters is can they DO the job
+// and are they reliable (not a job hopper)
 const PROMPT_TEMPLATE = (jobContext, rawText) => {
   const jobTitle       = typeof jobContext === 'string' ? jobContext : (jobContext.title || 'Software Engineer');
   const primarySkill   = typeof jobContext === 'object' ? (jobContext.primarySkill  || '') : '';
   const requiredSkills = typeof jobContext === 'object' ? (jobContext.requiredSkills || []) : [];
   const level          = typeof jobContext === 'object' ? (jobContext.level          || '') : '';
 
-  const skillMatchRules = primarySkill ? `
-CRITICAL SCORING RULES:
+  const skillRules = primarySkill ? `
+STRICT SCORING RULES — APPLY EXACTLY:
 - Primary skill required: "${primarySkill}"
 - Required skills: ${requiredSkills.length ? requiredSkills.join(', ') : 'not specified'}
-- If candidate does NOT have "${primarySkill}", aiScore MUST be 40 or below
-- If candidate has "${primarySkill}" but missing most required skills, cap at 65
-- Only give 75+ if candidate clearly has "${primarySkill}" AND most required skills
-- Only give 85+ if candidate is strong in "${primarySkill}" AND matches all required skills AND level
-- A strong Java developer applying for a React role scores 30-45 MAX` : '';
+- If candidate does NOT have "${primarySkill}" as primary/core skill → aiScore MUST be 35 or below
+- If candidate has "${primarySkill}" but missing most required skills → cap at 60
+- Give 70-80 only if candidate clearly has "${primarySkill}" AND most required skills
+- Give 85+ only if strong in "${primarySkill}" AND matches all required skills AND correct experience level
+- A Java developer applying for React role = 25-40 MAX regardless of overall experience
+- Job fit matters MORE than total years of experience` : '';
 
-  return `You are a senior Talent Acquisition expert evaluating a candidate for a specific role.
-Perform a comprehensive CV analysis using weighted scoring criteria.
+  return `You are an experienced Technical Recruiter and Hiring Manager screening a candidate.
 
-Job Title: ${jobTitle}${level ? `\nLevel Required: ${level}` : ''}${primarySkill ? `\nPrimary Skill: ${primarySkill}` : ''}${requiredSkills.length ? `\nRequired Skills: ${requiredSkills.join(', ')}` : ''}
-${skillMatchRules}
+ROLE: ${jobTitle}${level ? `\nLEVEL: ${level}` : ''}${primarySkill ? `\nPRIMARY SKILL: ${primarySkill}` : ''}${requiredSkills.length ? `\nREQUIRED SKILLS: ${requiredSkills.join(', ')}` : ''}
+${skillRules}
 
-CV SCORING BREAKDOWN (must add logic for each):
-1. skillsMatchScore (30%): How well do candidate skills match required/preferred skills?
-2. experienceScore (25%): Is years and type of experience relevant to this role?
-3. domainScore (15%): Does candidate's domain/industry match the role's domain?
-4. educationScore (10%): Does education/certification match requirements?
-5. projectRelevanceScore (10%): Are past projects relevant to this role?
-6. stabilityScore (10%): Is tenure stable? Penalize if frequent job changes (<1yr each).
+CV SCORING — based ONLY on 2 factors:
+1. skillsMatchScore (70% weight): How deeply does the candidate know the required skills?
+   - Look for: years using each skill, projects built with it, depth of usage
+   - Do NOT just check if skill name is mentioned — check actual usage
+   - Score 90+: Expert in primary skill + all required skills
+   - Score 70-89: Proficient in primary + most required skills
+   - Score 50-69: Has primary skill but gaps in required skills
+   - Score below 50: Missing primary skill or major gaps
 
-RISK FLAGS to detect:
-- frequentJobChanges: true if 2+ jobs with <1 year tenure
-- noticePeriodRisk: mention if notice period seems long (>60 days) or unclear
-- missingMandatorySkills: list skills from required that are clearly missing
-- domainMismatch: true if candidate domain doesn't match job domain
+2. stabilityScore (30% weight): Is the candidate reliable?
+   - Score 90+: 2+ years per role, no unexplained gaps
+   - Score 70-89: Mix of short and long tenures, mostly stable
+   - Score 50-69: Some job changes under 1 year
+   - Score below 50: Multiple roles under 6 months (job hopper red flag)
 
-Analyze the resume and return ONLY valid JSON — no extra text, no markdown:
+RISK FLAGS to detect from CV:
+- frequentJobChanges: true if 2+ jobs with under 1 year tenure
+- missingMandatorySkills: list which required skills are clearly NOT present in CV
+- domainMismatch: true if candidate's domain doesn't match job domain at all
+
+Analyze this resume and return ONLY valid JSON, no markdown, no extra text:
 {
-  "name": "full name",
+  "name": "full name from resume",
   "email": "email or empty string",
   "phone": "phone or empty string",
-  "domain": "primary tech domain e.g. Java Backend, React Frontend",
+  "domain": "primary tech domain e.g. Java Backend, React Frontend, DevOps",
   "seniority": "Junior or Mid or Senior or Lead",
   "experience_years": 5,
   "topSkills": ["skill1","skill2","skill3","skill4","skill5"],
-
   "primarySkillMatch": true,
   "primarySkillScore": 85,
   "jobFitScore": 78,
 
   "cvScoreBreakdown": {
-    "skillsMatchScore": 85,
-    "experienceScore": 80,
-    "domainScore": 75,
-    "educationScore": 70,
-    "projectRelevanceScore": 80,
-    "stabilityScore": 85
+    "skillsMatchScore": 82,
+    "stabilityScore": 75
   },
 
   "aiScore": 80,
@@ -66,59 +69,53 @@ Analyze the resume and return ONLY valid JSON — no extra text, no markdown:
 
   "riskFlags": {
     "frequentJobChanges": false,
-    "noticePeriodRisk": "Not mentioned",
-    "missingMandatorySkills": ["skill1","skill2"],
+    "missingMandatorySkills": ["skill1"],
     "domainMismatch": false
   },
 
-  "summary": "2-3 sentence CV overview mentioning job fit",
-  "hmSummary": "3-5 sentence hiring manager summary: why this candidate is or isn't suitable for ${jobTitle}. Mention specific strengths, concerns, and a clear recommendation rationale.",
+  "summary": "2-3 sentences about this candidate's technical fit for ${jobTitle}",
+  "hmSummary": "4-5 sentences for the Hiring Manager explaining: what technical skills are strong, what is missing, stability assessment, and a clear hire/no-hire rationale for ${jobTitle}.",
 
-  "technicalExperience":  "2-3 sentences about technical stack",
+  "technicalExperience":  "2-3 sentences about their tech stack and projects",
   "leadershipExperience": "1-2 sentences or None mentioned",
   "cloudExpertise":       "1-2 sentences or None mentioned",
 
   "databases":      ["PostgreSQL","MongoDB"],
   "frameworks":     ["Spring Boot","React"],
   "tools":          ["Docker","Jenkins","Git"],
-  "projectDomains": ["Telecom","Banking"],
+  "projectDomains": ["Banking","E-commerce"],
 
-  "strengths": ["strength 1 specific to this role","strength 2","strength 3"],
-  "gaps":      ["gap 1 vs requirements","gap 2"],
+  "strengths": ["Technical strength specific to this role","Another technical strength"],
+  "gaps":      ["Technical gap vs role requirements","Another gap"],
 
   "skillScores": [
-    {"skill":"${primarySkill || 'Primary Skill'}","score":85},
-    {"skill":"Secondary Skill","score":70}
+    {"skill": "${primarySkill || 'Primary Skill'}", "score": 85},
+    {"skill": "Secondary Skill", "score": 70}
   ],
 
-  "interviewFocusAreas": ["Focus area 1 for HM interview","Focus area 2","Focus area 3"],
+  "interviewFocusAreas": [
+    "Deep dive on ${primarySkill || 'primary skill'} — ask about specific projects",
+    "Test knowledge of required skills",
+    "Probe stability — reasons for short tenures if any"
+  ],
 
   "recommendation": "Strong Hire or Hire or Consider or Weak Fit or Reject",
-  "recommendationReason": "2-3 sentence explanation for ${jobTitle}"
+  "recommendationReason": "2-3 sentences explaining technical fit for ${jobTitle}"
 }
 
-Resume:
-${rawText.slice(0, 4000)}`;
+Resume text:
+${rawText.slice(0, 4500)}`;
 };
 
-// ── Calculate weighted CV score from breakdown ────────────────
+// ── Calculate CV score from breakdown (skills 70% + stability 30%) ──
 function calculateCVScore(breakdown) {
   if (!breakdown) return 0;
-  const weights = {
-    skillsMatchScore:      0.30,
-    experienceScore:       0.25,
-    domainScore:           0.15,
-    educationScore:        0.10,
-    projectRelevanceScore: 0.10,
-    stabilityScore:        0.10,
-  };
-  let total = 0;
-  for (const [key, weight] of Object.entries(weights)) {
-    total += (breakdown[key] || 0) * weight;
-  }
-  return Math.round(total);
+  const skills    = Number(breakdown.skillsMatchScore || 0);
+  const stability = Number(breakdown.stabilityScore   || 0);
+  return Math.round((skills * 0.70) + (stability * 0.30));
 }
 
+// ── Get AI providers from DB settings ────────────────────────
 async function getProvidersFromDB() {
   try {
     const Settings = require('../models/Settings');
@@ -128,7 +125,7 @@ async function getProvidersFromDB() {
         .filter(p => p.enabled && (p.apiKey || p.provider === 'ollama'))
         .sort((a, b) => a.priority - b.priority);
       if (active.length) {
-        console.log(`[AI] Found ${active.length} active providers: ${active.map(p => p.name).join(', ')}`);
+        console.log(`[AI] Providers: ${active.map(p => p.name).join(', ')}`);
         return active;
       }
     }
@@ -136,6 +133,7 @@ async function getProvidersFromDB() {
   return null;
 }
 
+// ── Main CV screening function ────────────────────────────────
 async function screenResumeWithAI(rawText, jobContext) {
   const prompt = PROMPT_TEMPLATE(jobContext, rawText);
 
@@ -145,8 +143,11 @@ async function screenResumeWithAI(rawText, jobContext) {
       try {
         const result = await callProvider(p.provider, p.apiKey, p.model, p.baseUrl, prompt);
         if (result) {
-          result.aiScore = calculateCVScore(result.cvScoreBreakdown) || result.aiScore || 0;
-          console.log(`[AI] Screened with ${p.name}, CV Score: ${result.aiScore}`);
+          // Recalculate score from breakdown
+          if (result.cvScoreBreakdown) {
+            result.aiScore = calculateCVScore(result.cvScoreBreakdown);
+          }
+          console.log(`[AI] CV screened with ${p.name} → Score: ${result.aiScore}`);
           return result;
         }
       } catch (e) { console.log(`[AI] ${p.name} failed: ${e.message}`); }
@@ -154,17 +155,17 @@ async function screenResumeWithAI(rawText, jobContext) {
   }
 
   const envProviders = [
-    { name:'Groq (env)',      fn: () => tryGroq(process.env.GROQ_API_KEY, 'llama-3.3-70b-versatile', prompt) },
-    { name:'OpenAI (env)',    fn: () => tryOpenAI(process.env.OPENAI_API_KEY, process.env.OPENAI_MODEL||'gpt-4o-mini', '', prompt) },
-    { name:'Anthropic (env)', fn: () => tryAnthropic(process.env.CLAUDE_API_KEY, 'claude-haiku-4-5-20251001', prompt) },
-    { name:'Gemini (env)',    fn: () => tryGemini(process.env.GEMINI_API_KEY, 'gemini-1.5-flash', prompt) },
+    { name:'Groq',      fn: () => tryGroq(process.env.GROQ_API_KEY, 'llama-3.3-70b-versatile', prompt) },
+    { name:'OpenAI',    fn: () => tryOpenAI(process.env.OPENAI_API_KEY, process.env.OPENAI_MODEL||'gpt-4o-mini', '', prompt) },
+    { name:'Anthropic', fn: () => tryAnthropic(process.env.CLAUDE_API_KEY, 'claude-haiku-4-5-20251001', prompt) },
+    { name:'Gemini',    fn: () => tryGemini(process.env.GEMINI_API_KEY, 'gemini-1.5-flash', prompt) },
   ];
   for (const { name, fn } of envProviders) {
     try {
       const result = await fn();
       if (result) {
-        result.aiScore = calculateCVScore(result.cvScoreBreakdown) || result.aiScore || 0;
-        console.log(`[AI] Screened with ${name}, CV Score: ${result.aiScore}`);
+        if (result.cvScoreBreakdown) result.aiScore = calculateCVScore(result.cvScoreBreakdown);
+        console.log(`[AI] CV screened with ${name} → Score: ${result.aiScore}`);
         return result;
       }
     } catch (e) { console.log(`[AI] ${name} failed: ${e.message}`); }
@@ -174,84 +175,103 @@ async function screenResumeWithAI(rawText, jobContext) {
   return null;
 }
 
-// ── Score screening answers with 5 criteria ──────────────────
+// ── Score screening answers — TECHNICAL ONLY ─────────────────
+// Score is based purely on technical accuracy and depth
+// No soft skills, no motivation, no behavioral scoring
 async function scoreScreeningAnswers(answers, candidateContext) {
-  const { appliedFor = 'Software Engineer', topSkills = [] } = candidateContext;
+  const { appliedFor = 'Software Engineer', topSkills = [], domain = '' } = candidateContext;
 
   const scoredAnswers = [];
   let totalScore = 0;
 
   for (const { question, answer } of answers) {
-    let scores = { technical: 0, communication: 0, problemSolving: 0, roleUnderstanding: 0, motivation: 0 };
-    let overallScore = 0;
-    let aiFeedback = '';
+    let technicalScore = 0;
+    let depthScore     = 0;
+    let accuracyScore  = 0;
+    let overallScore   = 0;
+    let aiFeedback     = '';
 
     if (answer?.trim() && process.env.GROQ_API_KEY) {
       try {
         const groq   = new Groq({ apiKey: process.env.GROQ_API_KEY });
-        const prompt = `You are a senior interviewer scoring a candidate's answer for a ${appliedFor} role.
-Candidate skills: ${topSkills.slice(0,5).join(', ')||'general'}
+        const prompt = `You are a Senior Technical Architect evaluating a candidate's technical answer.
+Role: ${appliedFor}
+Domain: ${domain || 'Software Engineering'}
+Candidate's core skills: ${topSkills.slice(0,5).join(', ')||'not specified'}
 
-Question: ${question}
-Answer: ${answer}
+Technical Question: ${question}
+Candidate's Answer: ${answer}
 
-Score the answer across 5 dimensions (0-100 each):
-1. technicalScore: Depth of technical knowledge demonstrated (not just keyword mention)
-2. communicationScore: Clarity, structure, and articulation of the answer
-3. problemSolvingScore: Problem-solving approach and logical thinking shown
-4. roleUnderstandingScore: Understanding of the role requirements and context
-5. motivationScore: Enthusiasm, availability fit, and motivation clarity
+Evaluate this answer PURELY on technical merit — not on communication style or soft skills.
+
+SCORING CRITERIA:
+1. technicalAccuracy (0-100): Is the answer technically correct? Are facts right? No wrong information?
+   - 90+: Perfectly accurate, shows expert-level understanding
+   - 70-89: Mostly correct with minor gaps
+   - 50-69: Partially correct, some misconceptions
+   - Below 50: Incorrect or shows fundamental misunderstanding
+
+2. technicalDepth (0-100): Does the answer show real hands-on experience, not just theory?
+   - 90+: Gives specific examples, mentions trade-offs, shows battle-tested knowledge
+   - 70-89: Good explanation with some practical context
+   - 50-69: Surface-level answer, textbook knowledge only
+   - Below 50: Vague or generic answer, no real depth
+
+3. roleRelevance (0-100): Is the answer relevant to the ${appliedFor} role requirements?
+   - 90+: Directly addresses what this role needs
+   - 70-89: Mostly relevant, minor tangents
+   - 50-69: Somewhat relevant
+   - Below 50: Off-topic or irrelevant to the role
 
 Return ONLY valid JSON:
 {
-  "technicalScore": 75,
-  "communicationScore": 80,
-  "problemSolvingScore": 70,
-  "roleUnderstandingScore": 75,
-  "motivationScore": 80,
-  "overallScore": 76,
-  "feedback": "One sentence of specific, actionable feedback about this answer"
+  "technicalAccuracy": 75,
+  "technicalDepth": 70,
+  "roleRelevance": 80,
+  "overallScore": 75,
+  "feedback": "One specific technical observation about this answer — what was strong or what was missing technically"
 }`;
 
         const resp  = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           messages: [{ role:'user', content:prompt }],
-          temperature: 0.1, max_tokens: 200,
+          temperature: 0.1, max_tokens: 250,
         });
         const text  = resp.choices[0].message.content.replace(/```json|```/g,'').trim();
         const match = text.match(/\{[\s\S]*\}/);
         if (match) {
-          const parsed = JSON.parse(match[0]);
-          scores = {
-            technical:        parsed.technicalScore        || 0,
-            communication:    parsed.communicationScore    || 0,
-            problemSolving:   parsed.problemSolvingScore   || 0,
-            roleUnderstanding:parsed.roleUnderstandingScore|| 0,
-            motivation:       parsed.motivationScore       || 0,
-          };
-          // Weighted screening score per answer
+          const parsed  = JSON.parse(match[0]);
+          technicalScore = parsed.technicalAccuracy || 0;
+          depthScore     = parsed.technicalDepth    || 0;
+          accuracyScore  = parsed.roleRelevance     || 0;
+          // Weighted: accuracy 40% + depth 40% + relevance 20%
           overallScore = Math.round(
-            scores.technical         * 0.40 +
-            scores.communication     * 0.20 +
-            scores.problemSolving    * 0.15 +
-            scores.roleUnderstanding * 0.15 +
-            scores.motivation        * 0.10
+            (technicalScore * 0.40) +
+            (depthScore     * 0.40) +
+            (accuracyScore  * 0.20)
           );
           aiFeedback = (parsed.feedback || '').slice(0, 150);
         }
-      } catch (e) { console.error('[screening score]', e.message); }
+      } catch (e) { console.error('[answer scoring]', e.message); }
     }
 
     totalScore += overallScore;
     scoredAnswers.push({
-      question:         question.slice(0, 200),
-      aiScore:          overallScore,
-      scoreBreakdown:   scores,
+      question:   question.slice(0, 200),
+      aiScore:    overallScore,
+      scoreBreakdown: {
+        technical:    technicalScore,
+        depth:        depthScore,
+        relevance:    accuracyScore,
+      },
       aiFeedback,
     });
   }
 
-  const screeningScore = answers.length > 0 ? Math.round(totalScore / answers.length) : 0;
+  const screeningScore = answers.length > 0
+    ? Math.round(totalScore / answers.length)
+    : 0;
+
   return { scoredAnswers, screeningScore };
 }
 
@@ -341,7 +361,7 @@ async function tryOllama(baseUrl, model, prompt) {
 function parseJSON(text) {
   const cleaned = text.replace(/```json|```/g,'').trim();
   const match = cleaned.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('No JSON in response');
+  if (!match) throw new Error('No JSON found in response');
   return JSON.parse(match[0]);
 }
 

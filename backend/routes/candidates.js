@@ -1,5 +1,5 @@
-const express = require('express');
-const router  = express.Router();
+const express   = require('express');
+const router    = express.Router();
 const Candidate = require('../models/Candidate');
 const AuditLog  = require('../models/AuditLog');
 const { protect } = require('../middleware/auth');
@@ -10,7 +10,7 @@ router.get('/', protect, async (req, res) => {
   try {
     const query = req.user.role === 'admin' ? {} : { uploadedBy: req.user._id };
     const candidates = await Candidate.find(query)
-      .populate('jobId', 'title department location')
+      .populate('jobId', 'title department location scoringWeights')
       .sort({ createdAt: -1 });
 
     const enriched = candidates.map(c => {
@@ -18,7 +18,8 @@ router.get('/', protect, async (req, res) => {
       if (obj.jobId && typeof obj.jobId === 'object') {
         obj.jobTitle      = obj.appliedFor || obj.jobId.title || '';
         obj.jobDepartment = obj.jobId.department || '';
-        obj.jobLocation   = obj.jobId.location || '';
+        obj.jobLocation   = obj.jobId.location   || '';
+        obj.scoringWeights = obj.jobId.scoringWeights || { cvWeight:60, screeningWeight:40 };
       } else {
         obj.jobTitle = obj.appliedFor || '';
       }
@@ -31,7 +32,8 @@ router.get('/', protect, async (req, res) => {
 // ── GET /api/candidates/:id ───────────────────────────────────
 router.get('/:id', protect, async (req, res) => {
   try {
-    const candidate = await Candidate.findById(req.params.id).populate('jobId', 'title department');
+    const candidate = await Candidate.findById(req.params.id)
+      .populate('jobId', 'title department scoringWeights');
     if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
     res.json({ candidate });
   } catch (err) { res.status(500).json({ message: err.message }); }
@@ -60,7 +62,6 @@ router.delete('/:id', protect, async (req, res) => {
 });
 
 // ── POST /api/candidates/:id/questions ────────────────────────
-// Generates AI questions with difficulty level support
 router.post('/:id/questions', protect, async (req, res) => {
   try {
     const candidate = await Candidate.findById(req.params.id);
@@ -70,55 +71,35 @@ router.post('/:id/questions', protect, async (req, res) => {
     const role      = jobTitle || candidate.appliedFor || 'Software Engineer';
     const topSkills = (skills || candidate.topSkills || []).slice(0, 8);
 
-    // ── Difficulty-specific prompt ────────────────────────────
     const difficultyInstructions = {
-      easy: `
-DIFFICULTY: EASY (suitable for 0-2 years experience)
-Question types to use:
+      easy: `DIFFICULTY: EASY (0-2 years experience)
 - Basic concept definitions ("What is X?", "Explain Y")
-- Simple how-to questions ("How do you do X?")
+- Simple how-to questions
 - Fundamental knowledge checks
-- Basic syntax or usage questions
-Avoid: System design, architecture, or complex scenario questions.`,
-      medium: `
-DIFFICULTY: MEDIUM (suitable for 3-5 years experience)
-Question types to use:
-- Real-world scenario questions ("How would you handle X situation?")
-- Problem-solving questions ("What approach would you take for Y?")
-- Describe past experience questions
-- Practical implementation questions
+- No system design or architecture questions`,
+      medium: `DIFFICULTY: MEDIUM (3-5 years experience)
+- Real-world scenario questions ("How would you handle X?")
+- Problem-solving and practical implementation
 - Trade-off comparison questions
-Avoid: Pure definitions or highly advanced architecture questions.`,
-      hard: `
-DIFFICULTY: HARD (suitable for 6+ years experience)
-Question types to use:
-- System design questions ("Design a system that does X")
-- Architecture decision questions ("How would you architect Y at scale?")
-- Leadership & mentoring questions
-- Complex trade-offs and optimization questions
-- Cross-team collaboration scenarios
-- Performance and scalability deep-dives
-Avoid: Basic concept questions.`,
+- Past experience questions`,
+      hard: `DIFFICULTY: HARD (6+ years experience)
+- System design questions ("Design a system for X")
+- Architecture decisions and trade-offs
+- Leadership and mentoring scenarios
+- Performance, scalability, cross-team collaboration`,
     };
 
-    const prompt = `You are a senior technical interviewer. Generate exactly 8 interview questions for the role below.
+    const prompt = `You are a senior technical interviewer. Generate exactly 8 interview questions.
 
 Role: ${role}
-Candidate Skills: ${topSkills.join(', ') || 'general software engineering'}
-Seniority: ${candidate.seniority || 'Mid'}
-Domain: ${candidate.domain || 'Software Engineering'}
-Experience: ${candidate.experienceYears || 'unknown'} years
+Skills: ${topSkills.join(', ')||'general software engineering'}
+Seniority: ${candidate.seniority||'Mid'}
+Experience: ${candidate.experienceYears||'unknown'} years
 
-${difficultyInstructions[difficulty] || difficultyInstructions.medium}
+${difficultyInstructions[difficulty]||difficultyInstructions.medium}
 
-CRITICAL RULES:
-1. Return ONLY a valid JSON array of exactly 8 question strings
-2. Each question must be specific to the role and skills listed
-3. Questions must match the difficulty level strictly
-4. No numbering, no explanation, no markdown — just the JSON array
-
-Example format:
-["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?", "Question 6?", "Question 7?", "Question 8?"]`;
+Return ONLY a valid JSON array of exactly 8 question strings:
+["Question 1?","Question 2?","Question 3?","Question 4?","Question 5?","Question 6?","Question 7?","Question 8?"]`;
 
     let questions = [];
 
@@ -126,69 +107,31 @@ Example format:
       try {
         const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
         const resp = await groq.chat.completions.create({
-          model:       'llama-3.3-70b-versatile',
-          messages:    [{ role: 'user', content: prompt }],
-          temperature: difficulty === 'easy' ? 0.2 : difficulty === 'hard' ? 0.5 : 0.35,
-          max_tokens:  1000,
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role:'user', content:prompt }],
+          temperature: difficulty==='easy'?0.2:difficulty==='hard'?0.5:0.35,
+          max_tokens: 1000,
         });
-        const text  = resp.choices[0].message.content.replace(/```json|```/g, '').trim();
+        const text  = resp.choices[0].message.content.replace(/```json|```/g,'').trim();
         const match = text.match(/\[[\s\S]*\]/);
         if (match) {
           const parsed = JSON.parse(match[0]);
-          if (Array.isArray(parsed) && parsed.length >= 4) questions = parsed.slice(0, 8);
+          if (Array.isArray(parsed) && parsed.length >= 4) questions = parsed.slice(0,8);
         }
-      } catch (e) { console.error('[AI questions error]', e.message); }
+      } catch (e) { console.error('[AI questions]', e.message); }
     }
 
-    // ── Fallback questions by difficulty ─────────────────────
     if (questions.length === 0) {
       const fallbacks = {
-        easy: [
-          `What is ${topSkills[0] || role} and what is it used for?`,
-          `Can you explain the basic concepts of ${topSkills[1] || 'object-oriented programming'}?`,
-          `What is the difference between ${topSkills[0] || 'a function'} and a method?`,
-          `How do you declare and use variables in ${topSkills[0] || 'your preferred language'}?`,
-          `What tools do you use for version control and why?`,
-          `Describe your experience working in a team environment.`,
-          `What is debugging and how do you approach fixing a simple bug?`,
-          `Where do you see yourself growing in the next 1-2 years?`,
-        ],
-        medium: [
-          `Can you walk me through your experience with ${topSkills[0] || role}?`,
-          `Describe a challenging project you worked on and how you overcame obstacles.`,
-          `How do you approach debugging complex issues in production?`,
-          `What design patterns have you used and when would you choose one over another?`,
-          `How do you ensure code quality in your projects?`,
-          `Describe your experience with agile methodologies.`,
-          `How would you handle a situation where requirements change mid-project?`,
-          `How do you collaborate with frontend/backend/QA teams on a feature?`,
-        ],
-        hard: [
-          `How would you design a scalable ${topSkills[0] || 'microservices'} architecture for a high-traffic application?`,
-          `Describe a time you led a complex technical initiative. What challenges did you face?`,
-          `How would you approach migrating a monolithic application to microservices?`,
-          `How do you ensure high availability and fault tolerance in distributed systems?`,
-          `Describe your approach to performance optimization at scale.`,
-          `How do you mentor junior developers while still delivering on your own tasks?`,
-          `What trade-offs would you consider between consistency and availability in a distributed system?`,
-          `How would you handle a critical production incident with no clear root cause?`,
-        ],
+        easy:   [`What is ${topSkills[0]||role} and what is it used for?`,`Explain the basic concepts of ${topSkills[1]||'object-oriented programming'}.`,`How do you declare and use variables in your preferred language?`,`What is the difference between a function and a method?`,`What tools do you use for version control?`,`Describe your experience working in a team.`,`What is debugging and how do you fix a simple bug?`,`Where do you want to grow in the next 1-2 years?`],
+        medium: [`Walk me through your experience with ${topSkills[0]||role}.`,`Describe a challenging project and how you overcame obstacles.`,`How do you approach debugging complex production issues?`,`What design patterns have you used and why?`,`How do you ensure code quality in your projects?`,`Describe your experience with agile methodologies.`,`How would you handle changing requirements mid-project?`,`How do you collaborate with cross-functional teams?`],
+        hard:   [`Design a scalable ${topSkills[0]||'microservices'} architecture for high traffic.`,`Describe a time you led a complex technical initiative.`,`How would you migrate a monolithic app to microservices?`,`How do you ensure high availability in distributed systems?`,`Describe your approach to performance optimization at scale.`,`How do you mentor junior developers while delivering your own work?`,`What trade-offs exist between consistency and availability?`,`How would you handle a critical production incident with no clear root cause?`],
       };
-      questions = fallbacks[difficulty] || fallbacks.medium;
+      questions = fallbacks[difficulty]||fallbacks.medium;
     }
 
     await Candidate.findByIdAndUpdate(req.params.id, {
-      interviewQuestions: questions,
-      status:             'questions_sent',
-      updatedAt:          new Date(),
-    });
-
-    await AuditLog.create({
-      user:     req.user.name,
-      userId:   req.user._id,
-      action:   'QUESTIONS_GENERATED',
-      resource: 'candidates',
-      details:  `${difficulty} questions generated for ${candidate.name}`.slice(0, 150),
+      interviewQuestions: questions, status:'questions_sent', updatedAt: new Date(),
     });
 
     res.json({ questions, difficulty, count: questions.length });
@@ -199,60 +142,58 @@ Example format:
 });
 
 // ── POST /api/candidates/:id/answers ─────────────────────────
+// Uses enhanced 5-criteria scoring + weighted combined score
 router.post('/:id/answers', protect, async (req, res) => {
   try {
-    const candidate = await Candidate.findById(req.params.id);
+    const candidate = await Candidate.findById(req.params.id)
+      .populate('jobId', 'scoringWeights');
     if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
 
     const { answers } = req.body;
-    if (!answers || !answers.length) return res.status(400).json({ message: 'No answers provided' });
+    if (!answers?.length) return res.status(400).json({ message: 'No answers provided' });
 
-    const scoredAnswers = [];
-    let totalScore = 0;
+    // Get configurable weights (default CV:60%, Screening:40%)
+    const weights = candidate.jobId?.scoringWeights || { cvWeight:60, screeningWeight:40 };
+    const cvWeight        = (weights.cvWeight        || 60) / 100;
+    const screeningWeight = (weights.screeningWeight || 40) / 100;
 
-    for (const { question, answer } of answers) {
-      let aiScore = 0;
-      let aiFeedback = '';
+    // Use enhanced scoring from aiService
+    const { scoreScreeningAnswers } = require('../services/aiService');
+    const { scoredAnswers, screeningScore } = await scoreScreeningAnswers(answers, {
+      appliedFor: candidate.appliedFor || 'Software Engineer',
+      topSkills:  candidate.topSkills  || [],
+    });
 
-      if (process.env.GROQ_API_KEY && answer?.trim()) {
-        try {
-          const groq   = new Groq({ apiKey: process.env.GROQ_API_KEY });
-          const prompt = `You are a technical interviewer. Score this answer from 0-100 and give brief feedback.
-Role: ${candidate.appliedFor || 'Software Engineer'}
-Question: ${question}
-Answer: ${answer}
+    // Calculate screening breakdown averages
+    const screeningBreakdown = {
+      technical:         Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.technical||0),0)/scoredAnswers.length),
+      communication:     Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.communication||0),0)/scoredAnswers.length),
+      problemSolving:    Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.problemSolving||0),0)/scoredAnswers.length),
+      roleUnderstanding: Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.roleUnderstanding||0),0)/scoredAnswers.length),
+      motivation:        Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.motivation||0),0)/scoredAnswers.length),
+    };
 
-Return ONLY valid JSON: {"score": 75, "feedback": "Brief 1-sentence feedback"}`;
+    // Weighted combined score
+    const cvScore       = candidate.aiScore || 0;
+    const combinedScore = Math.round((cvScore * cvWeight) + (screeningScore * screeningWeight));
 
-          const resp  = await groq.chat.completions.create({
-            model: 'llama-3.3-70b-versatile',
-            messages: [{ role: 'user', content: prompt }],
-            temperature: 0.1, max_tokens: 150,
-          });
-          const text  = resp.choices[0].message.content.replace(/```json|```/g, '').trim();
-          const match = text.match(/\{[\s\S]*\}/);
-          if (match) {
-            const parsed = JSON.parse(match[0]);
-            aiScore    = parsed.score || 0;
-            aiFeedback = parsed.feedback || '';
-          }
-        } catch (e) { console.error('[answer scoring]', e.message); }
-      }
+    // Determine recommendation based on combined score
+    const recommendation =
+      combinedScore >= 85 ? 'Strong Hire' :
+      combinedScore >= 70 ? 'Hire'        :
+      combinedScore >= 55 ? 'Consider'    :
+      combinedScore >= 40 ? 'Weak Fit'    : 'Reject';
 
-      totalScore += aiScore;
-      // Store only score + feedback, NOT the full answer text (saves DB space)
-      scoredAnswers.push({ question: question.slice(0, 200), aiScore, aiFeedback: aiFeedback.slice(0, 150) });
-    }
-
-    const screeningScore = Math.round(totalScore / answers.length);
-    const combinedScore  = Math.round((screeningScore + (candidate.aiScore || 0)) / 2);
-    const newStatus      = combinedScore >= 60 ? 'hm_ready' : 'answers_submitted';
+    const newStatus = combinedScore >= 60 ? 'hm_ready' : 'answers_submitted';
 
     const updated = await Candidate.findByIdAndUpdate(req.params.id, {
-      screeningAnswers: scoredAnswers,
+      screeningAnswers:    scoredAnswers,
       screeningScore,
-      status:    newStatus,
-      updatedAt: new Date(),
+      screeningBreakdown,
+      combinedScore,
+      recommendation,
+      status:      newStatus,
+      updatedAt:   new Date(),
     }, { new: true });
 
     await AuditLog.create({
@@ -260,10 +201,19 @@ Return ONLY valid JSON: {"score": 75, "feedback": "Brief 1-sentence feedback"}`;
       userId:   req.user._id,
       action:   'ANSWERS_SUBMITTED',
       resource: 'candidates',
-      details:  `${candidate.name} Score:${screeningScore} Status:${newStatus}`.slice(0, 150),
+      details:  `${candidate.name} CV:${cvScore} Screen:${screeningScore} Combined:${combinedScore} → ${recommendation}`.slice(0,150),
     });
 
-    res.json({ candidate: updated, screeningScore, status: newStatus, combinedScore });
+    res.json({
+      candidate: updated,
+      screeningScore,
+      screeningBreakdown,
+      combinedScore,
+      cvScore,
+      recommendation,
+      status: newStatus,
+      weights: { cvWeight: weights.cvWeight, screeningWeight: weights.screeningWeight },
+    });
   } catch (err) {
     console.error('[answers]', err);
     res.status(500).json({ message: err.message });
@@ -276,38 +226,37 @@ router.post('/:id/rescreen', protect, async (req, res) => {
     const candidate = await Candidate.findById(req.params.id);
     if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
 
-    const { screenResumeWithAI } = require('../services/aiService');
+    const { screenResumeWithAI, calculateCVScore } = require('../services/aiService');
 
-    const resumeText = `
-Name: ${candidate.name}
-Email: ${candidate.email}
-Domain: ${candidate.domain || ''}
-Seniority: ${candidate.seniority || ''}
-Experience: ${candidate.experienceYears || 0} years
-Skills: ${(candidate.topSkills || []).join(', ')}
-Applied For: ${candidate.appliedFor || ''}
-Summary: ${candidate.summary || ''}`.trim();
+    const resumeText = `Name: ${candidate.name}\nEmail: ${candidate.email}\nDomain: ${candidate.domain||''}\nSeniority: ${candidate.seniority||''}\nExperience: ${candidate.experienceYears||0} years\nSkills: ${(candidate.topSkills||[]).join(', ')}\nApplied For: ${candidate.appliedFor||''}\nSummary: ${candidate.summary||''}`.trim();
 
-    const ai = await screenResumeWithAI(resumeText, candidate.appliedFor || '');
+    const ai = await screenResumeWithAI(resumeText, candidate.appliedFor||'');
     if (!ai) return res.status(500).json({ message: 'AI screening failed' });
 
+    const cvScore = calculateCVScore(ai.cvScoreBreakdown) || ai.aiScore || 0;
+
     const updated = await Candidate.findByIdAndUpdate(req.params.id, {
-      aiScore:              Number(ai.aiScore) || 0,
-      tier:                 ai.tier            || candidate.tier,
-      riskLevel:            ai.riskLevel       || candidate.riskLevel,
-      summary:              (ai.summary        || candidate.summary  || '').slice(0, 400),
-      topSkills:            (ai.topSkills?.length ? ai.topSkills : candidate.topSkills || []).slice(0, 10),
-      skillScores:          (ai.skillScores    || []).slice(0, 8),
-      strengths:            (ai.strengths      || []).slice(0, 4),
-      gaps:                 (ai.gaps           || []).slice(0, 4),
-      technicalExperience:  (ai.technicalExperience  || '').slice(0, 200),
-      leadershipExperience: (ai.leadershipExperience || '').slice(0, 200),
-      cloudExpertise:       (ai.cloudExpertise       || '').slice(0, 200),
-      databases:            (ai.databases      || []).slice(0, 8),
-      frameworks:           (ai.frameworks     || []).slice(0, 8),
-      tools:                (ai.tools          || []).slice(0, 8),
-      recommendation:       ai.recommendation       || '',
-      recommendationReason: (ai.recommendationReason || '').slice(0, 200),
+      aiScore:              cvScore,
+      cvScoreBreakdown:     ai.cvScoreBreakdown    || {},
+      tier:                 ai.tier                || candidate.tier,
+      riskLevel:            ai.riskLevel           || candidate.riskLevel,
+      riskFlags:            ai.riskFlags           || {},
+      summary:              (ai.summary            || '').slice(0,400),
+      hmSummary:            (ai.hmSummary          || '').slice(0,600),
+      topSkills:            (ai.topSkills?.length?ai.topSkills:candidate.topSkills||[]).slice(0,10),
+      skillScores:          (ai.skillScores        || []).slice(0,8),
+      strengths:            (ai.strengths          || []).slice(0,4),
+      gaps:                 (ai.gaps               || []).slice(0,4),
+      technicalExperience:  (ai.technicalExperience  ||'').slice(0,200),
+      leadershipExperience: (ai.leadershipExperience ||'').slice(0,200),
+      cloudExpertise:       (ai.cloudExpertise       ||'').slice(0,200),
+      databases:            (ai.databases          || []).slice(0,8),
+      frameworks:           (ai.frameworks         || []).slice(0,8),
+      tools:                (ai.tools              || []).slice(0,8),
+      interviewFocusAreas:  (ai.interviewFocusAreas|| []).slice(0,5),
+      missingMandatorySkills:(ai.riskFlags?.missingMandatorySkills||[]).slice(0,5),
+      recommendation:       ai.recommendation      || '',
+      recommendationReason: (ai.recommendationReason||'').slice(0,200),
       status:               'ai_screened',
       updatedAt:            new Date(),
     }, { new: true });

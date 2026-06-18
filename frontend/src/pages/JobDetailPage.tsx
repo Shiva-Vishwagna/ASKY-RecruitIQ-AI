@@ -6,6 +6,7 @@ interface Job {
   _id: string; title: string; department: string; location: string;
   status: string; description: string; requirements: string[];
   level?: string; requiredSkills?: string[]; minAiScore?: number; createdAt: string;
+  questionBank?: { text: string; difficulty: "easy" | "medium" | "hard"; category: string }[];
 }
 interface Candidate {
   _id: string; name: string; email: string;
@@ -13,19 +14,18 @@ interface Candidate {
   tier: string; riskLevel: string; status?: string;
   appliedAt?: string; createdAt?: string;
   topSkills?: string[]; domain?: string; seniority?: string; experienceYears?: number;
-  primarySkillMatch?: boolean;
-  jobFitScore?: number;
+  primarySkillMatch?: boolean; jobFitScore?: number;
   interviewQuestions?: string[];
   screeningAnswers?: { question: string; answer: string; aiScore?: number; aiFeedback?: string }[];
 }
 
 const STAGES = [
-  { value: "cv_uploaded",       label: "CV Uploaded",       color: "bg-gray-100 text-gray-600",     dot: "bg-gray-400" },
-  { value: "ai_screened",       label: "AI Screened",       color: "bg-blue-100 text-blue-700",     dot: "bg-blue-500" },
-  { value: "questions_sent",    label: "Questions Sent",    color: "bg-purple-100 text-purple-700", dot: "bg-purple-500" },
-  { value: "answers_submitted", label: "Answers Submitted", color: "bg-amber-100 text-amber-700",   dot: "bg-amber-500" },
-  { value: "hm_ready",          label: "HM Ready",          color: "bg-emerald-100 text-emerald-700", dot: "bg-emerald-500" },
-  { value: "rejected",          label: "Rejected",          color: "bg-red-100 text-red-700",       dot: "bg-red-500" },
+  { value: "cv_uploaded",       label: "CV Uploaded",       color: "bg-gray-100 text-gray-600",      dot: "bg-gray-400"    },
+  { value: "ai_screened",       label: "AI Screened",       color: "bg-blue-100 text-blue-700",      dot: "bg-blue-500"    },
+  { value: "questions_sent",    label: "Questions Sent",    color: "bg-purple-100 text-purple-700",  dot: "bg-purple-500"  },
+  { value: "answers_submitted", label: "Answers Submitted", color: "bg-amber-100 text-amber-700",    dot: "bg-amber-500"   },
+  { value: "hm_ready",          label: "HM Ready",          color: "bg-emerald-100 text-emerald-700",dot: "bg-emerald-500" },
+  { value: "rejected",          label: "Rejected",          color: "bg-red-100 text-red-700",        dot: "bg-red-500"     },
 ];
 
 const tierColors: Record<string, string> = {
@@ -34,33 +34,52 @@ const tierColors: Record<string, string> = {
   C: "bg-amber-100 text-amber-700",
 };
 
+const DIFFICULTY_COLORS = {
+  easy:   "bg-emerald-100 text-emerald-700 border-emerald-200",
+  medium: "bg-amber-100 text-amber-700 border-amber-200",
+  hard:   "bg-red-100 text-red-700 border-red-200",
+};
+
+const CATEGORIES = [
+  "Technical", "Behavioral", "Situational", "Leadership",
+  "Problem Solving", "Communication", "Domain Knowledge", "Other"
+];
+
 export default function JobDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [job, setJob] = useState<Job | null>(null);
+  const [job, setJob]               = useState<Job | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [activeTab, setActiveTab] = useState("pipeline");
+  const [activeTab, setActiveTab]   = useState("pipeline");
   const [stageFilter, setStageFilter] = useState("all");
-  const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
+  const [loading, setLoading]       = useState(true);
+  const [uploading, setUploading]   = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
 
-  const API = "https://asky-recruitiq-ai.onrender.com/api";
+  // Question bank state
+  const [questionBank, setQuestionBank] = useState<{ text: string; difficulty: "easy"|"medium"|"hard"; category: string }[]>([]);
+  const [newQuestion, setNewQuestion]   = useState({ text: "", difficulty: "medium" as "easy"|"medium"|"hard", category: "Technical" });
+  const [savingBank, setSavingBank]     = useState(false);
+  const [bankSaved, setBankSaved]       = useState(false);
+
+  const API   = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
 
   useEffect(() => { fetchJob(); fetchCandidates(); }, [id]);
 
   async function fetchJob() {
     try {
-      const res = await fetch(`${API}/jobs/${id}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res  = await fetch(`${API}/jobs/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
-      setJob(data.job || data);
+      const j    = data.job || data;
+      setJob(j);
+      setQuestionBank(j.questionBank || []);
     } finally { setLoading(false); }
   }
 
   async function fetchCandidates() {
     try {
-      const res = await fetch(`${API}/jobs/${id}/candidates`, { headers: { Authorization: `Bearer ${token}` } });
+      const res  = await fetch(`${API}/jobs/${id}/candidates`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       setCandidates(data.candidates || data || []);
     } catch { setCandidates([]); }
@@ -72,13 +91,11 @@ export default function JobDetailPage() {
     setUploading(true);
     const formData = new FormData();
     Array.from(files).forEach(f => formData.append("resumes", f));
-    formData.append("jobId", id || "");
+    formData.append("jobId",    id || "");
     formData.append("jobTitle", job?.title || "");
     try {
       await fetch(`${API}/resumes/upload`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
+        method: "POST", headers: { Authorization: `Bearer ${token}` }, body: formData,
       });
       await fetchCandidates();
     } finally { setUploading(false); e.target.value = ""; }
@@ -95,16 +112,53 @@ export default function JobDetailPage() {
   }
 
   async function deleteCandidate(candidateId: string) {
-    if (!window.confirm("Remove this candidate from the job?")) return;
+    if (!window.confirm("Remove this candidate?")) return;
     await fetch(`${API}/candidates/${candidateId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
     setCandidates(prev => prev.filter(c => c._id !== candidateId));
     if (selectedCandidate?._id === candidateId) setSelectedCandidate(null);
+  }
+
+  // ── Question Bank functions ───────────────────────────────────
+  function addQuestion() {
+    if (!newQuestion.text.trim()) return;
+    if (questionBank.length >= 20) return alert("Maximum 20 questions per job. Remove some first.");
+    setQuestionBank(prev => [...prev, { ...newQuestion, text: newQuestion.text.trim() }]);
+    setNewQuestion({ text: "", difficulty: "medium", category: "Technical" });
+    setBankSaved(false);
+  }
+
+  function removeQuestion(idx: number) {
+    setQuestionBank(prev => prev.filter((_, i) => i !== idx));
+    setBankSaved(false);
+  }
+
+  function updateQuestion(idx: number, field: string, value: string) {
+    setQuestionBank(prev => prev.map((q, i) => i === idx ? { ...q, [field]: value } : q));
+    setBankSaved(false);
+  }
+
+  async function saveQuestionBank() {
+    setSavingBank(true);
+    try {
+      const res = await fetch(`${API}/jobs/${id}/question-bank`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ questions: questionBank }),
+      });
+      if (res.ok) { setBankSaved(true); setTimeout(() => setBankSaved(false), 3000); }
+      else alert("Failed to save question bank.");
+    } catch { alert("Error saving question bank."); }
+    finally { setSavingBank(false); }
   }
 
   if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" /></div>;
   if (!job) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p className="text-gray-500">Job not found</p></div>;
 
   const filteredCandidates = stageFilter === "all" ? candidates : candidates.filter(c => (c.status || "cv_uploaded") === stageFilter);
+
+  const easyCount   = questionBank.filter(q => q.difficulty === "easy").length;
+  const mediumCount = questionBank.filter(q => q.difficulty === "medium").length;
+  const hardCount   = questionBank.filter(q => q.difficulty === "hard").length;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -128,13 +182,7 @@ export default function JobDetailPage() {
           </div>
           <div className="flex items-center gap-3">
             <span className={`px-3 py-1 rounded-full text-sm font-semibold capitalize ${job.status === "open" ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-600"}`}>{job.status}</span>
-            {/* ── Share JD Button ── */}
-            <ShareJobButton
-              jobId={id || ""}
-              jobTitle={job.title}
-              department={job.department}
-              location={job.location}
-            />
+            <ShareJobButton jobId={id || ""} jobTitle={job.title} department={job.department} location={job.location} />
             <label className={`bg-blue-600 text-white px-4 py-2 rounded-xl font-semibold cursor-pointer hover:bg-blue-700 transition-all text-sm ${uploading ? "opacity-60 pointer-events-none" : ""}`}>
               {uploading ? "⏳ Uploading..." : "📎 Upload Resumes"}
               <input type="file" multiple accept=".pdf,.doc,.docx" onChange={handleResumeUpload} className="hidden" />
@@ -146,19 +194,22 @@ export default function JobDetailPage() {
       {/* Tabs */}
       <div className="bg-white border-b border-gray-100 px-6">
         <div className="flex gap-6">
-          {["pipeline", "overview"].map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`py-3 px-1 text-sm font-semibold capitalize border-b-2 transition-all ${activeTab === tab ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
-              {tab === "pipeline" ? `Pipeline (${candidates.length})` : "Job Overview"}
+          {[
+            { key: "pipeline",      label: `Pipeline (${candidates.length})` },
+            { key: "question-bank", label: `📋 Question Bank (${questionBank.length})` },
+            { key: "overview",      label: "Job Overview" },
+          ].map(tab => (
+            <button key={tab.key} onClick={() => setActiveTab(tab.key)}
+              className={`py-3 px-1 text-sm font-semibold border-b-2 transition-all whitespace-nowrap ${activeTab === tab.key ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
+              {tab.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* PIPELINE TAB */}
+      {/* ── PIPELINE TAB ── */}
       {activeTab === "pipeline" && (
         <div className="flex h-[calc(100vh-200px)]">
-          {/* Left: Stage filter + candidate list */}
           <div className="w-80 border-r border-gray-100 bg-white flex flex-col shrink-0">
             <div className="p-4 border-b border-gray-100">
               <button onClick={() => setStageFilter("all")}
@@ -179,7 +230,6 @@ export default function JobDetailPage() {
                 );
               })}
             </div>
-
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
               {filteredCandidates.length === 0 ? (
                 <div className="text-center py-8 text-gray-400 text-sm">
@@ -187,9 +237,9 @@ export default function JobDetailPage() {
                   {stageFilter === "all" && <p className="mt-1">Upload resumes to get started</p>}
                 </div>
               ) : filteredCandidates.map(c => {
-                const stage = STAGES.find(s => s.value === (c.status || "cv_uploaded")) || STAGES[0];
-                const score = c.aiScore || c.score || 0;
-                const tierKey = c.tier?.replace(/-?Tier$/i, "");
+                const stage    = STAGES.find(s => s.value === (c.status || "cv_uploaded")) || STAGES[0];
+                const score    = c.aiScore || c.score || 0;
+                const tierKey  = c.tier?.replace(/-?Tier$/i, "");
                 return (
                   <div key={c._id} onClick={() => setSelectedCandidate(c)}
                     className={`p-3 rounded-xl cursor-pointer border transition-all ${selectedCandidate?._id === c._id ? "border-blue-400 bg-blue-50" : "border-gray-100 bg-white hover:border-gray-300"}`}>
@@ -211,10 +261,8 @@ export default function JobDetailPage() {
                         <span className="text-xs font-bold text-gray-600">{score}</span>
                       </div>
                     </div>
-                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                    <div className="mt-2">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${stage.color}`}>{stage.label}</span>
-                      {c.primarySkillMatch === false && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">⚠ Mismatch</span>}
-                      {c.primarySkillMatch === true && <span className="text-xs bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded-full">✓ Match</span>}
                     </div>
                   </div>
                 );
@@ -222,23 +270,17 @@ export default function JobDetailPage() {
             </div>
           </div>
 
-          {/* Right: Candidate detail panel OR job insights */}
+          {/* Right panel */}
           <div className="flex-1 overflow-y-auto">
             {selectedCandidate ? (
               <CandidatePanel
-                candidate={selectedCandidate}
-                job={job}
-                API={API}
-                token={token || ""}
-                onStatusChange={(newStatus) => updateCandidateStatus(selectedCandidate._id, newStatus)}
+                candidate={selectedCandidate} job={job}
+                API={API} token={token || ""}
+                onStatusChange={(s) => updateCandidateStatus(selectedCandidate._id, s)}
                 onDelete={() => deleteCandidate(selectedCandidate._id)}
-                onUpdate={(updated) => {
-                  setSelectedCandidate(updated);
-                  setCandidates(prev => prev.map(c => c._id === updated._id ? updated : c));
-                }}
+                onUpdate={(updated) => { setSelectedCandidate(updated); setCandidates(prev => prev.map(c => c._id === updated._id ? updated : c)); }}
               />
             ) : (
-              /* ── Job Insights Panel (replaces empty state) ── */
               <div className="p-6 space-y-5">
                 <h2 className="font-bold text-gray-700 text-sm uppercase tracking-wide">📊 Pipeline Summary</h2>
                 <div className="grid grid-cols-3 gap-3">
@@ -246,64 +288,51 @@ export default function JobDetailPage() {
                     const count = candidates.filter(c => (c.status || "cv_uploaded") === s.value).length;
                     return (
                       <button key={s.value} onClick={() => setStageFilter(s.value)}
-                        className={`rounded-2xl p-4 text-center border-2 transition-all hover:scale-105 ${count > 0 ? s.color + " border-current/20 cursor-pointer" : "bg-gray-50 text-gray-300 border-gray-100 cursor-default"}`}>
+                        className={`rounded-2xl p-4 text-center border-2 transition-all hover:scale-105 ${count > 0 ? s.color + " border-current/20" : "bg-gray-50 text-gray-300 border-gray-100"}`}>
                         <div className="text-3xl font-black">{count}</div>
                         <div className="text-xs font-semibold mt-1 leading-tight">{s.label}</div>
                       </button>
                     );
                   })}
                 </div>
-
-                {/* Top Candidates */}
-                {candidates.length > 0 ? (
+                {candidates.length > 0 && (
                   <div className="bg-white rounded-2xl border border-gray-100 p-5">
-                    <h3 className="font-bold text-gray-900 mb-4">🏆 Top Candidates by Score</h3>
+                    <h3 className="font-bold text-gray-900 mb-4">🏆 Top Candidates</h3>
                     <div className="space-y-2">
-                      {[...candidates]
-                        .sort((a, b) => (b.aiScore||b.score||0) - (a.aiScore||a.score||0))
-                        .slice(0, 6)
-                        .map(c => {
-                          const score = c.aiScore || c.score || 0;
-                          const tierKey = c.tier?.replace(/-?Tier$/i, "");
-                          const stage = STAGES.find(s => s.value === (c.status || "cv_uploaded")) || STAGES[0];
-                          return (
-                            <div key={c._id} onClick={() => setSelectedCandidate(c)}
-                              className="flex items-center gap-3 p-3 rounded-xl hover:bg-blue-50 cursor-pointer border border-transparent hover:border-blue-100 transition-all">
-                              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
-                                {c.name?.charAt(0)?.toUpperCase()}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="font-semibold text-gray-900 text-sm truncate">{c.name}</div>
-                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${stage.color}`}>{stage.label}</span>
-                              </div>
-                              <div className="text-right shrink-0">
-                                <div className={`text-sm font-black ${score >= 80 ? "text-emerald-600" : score >= 60 ? "text-blue-600" : "text-amber-600"}`}>{score}</div>
-                                <div className={`text-xs font-bold ${tierColors[tierKey] || "text-gray-400"}`}>{tierKey}-Tier</div>
-                              </div>
+                      {[...candidates].sort((a,b) => (b.aiScore||b.score||0)-(a.aiScore||a.score||0)).slice(0,5).map(c => {
+                        const score   = c.aiScore||c.score||0;
+                        const tierKey = c.tier?.replace(/-?Tier$/i,"");
+                        const stage   = STAGES.find(s => s.value === (c.status||"cv_uploaded")) || STAGES[0];
+                        return (
+                          <div key={c._id} onClick={() => setSelectedCandidate(c)}
+                            className="flex items-center gap-3 p-3 rounded-xl hover:bg-blue-50 cursor-pointer border border-transparent hover:border-blue-100 transition-all">
+                            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
+                              {c.name?.charAt(0)?.toUpperCase()}
                             </div>
-                          );
-                        })}
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-gray-900 text-sm truncate">{c.name}</div>
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${stage.color}`}>{stage.label}</span>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className={`text-sm font-black ${score >= 80 ? "text-emerald-600" : score >= 60 ? "text-blue-600" : "text-amber-600"}`}>{score}</div>
+                              <div className={`text-xs font-bold ${tierColors[tierKey] || "text-gray-400"}`}>{tierKey}-Tier</div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
-                ) : (
-                  <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400">
-                    <div className="text-5xl mb-3">📎</div>
-                    <p className="font-medium">No candidates yet</p>
-                    <p className="text-sm mt-1">Upload resumes or share the JD link to get applicants</p>
-                  </div>
                 )}
-
-                {/* Quick Stats */}
                 <div className="bg-white rounded-2xl border border-gray-100 p-5">
                   <h3 className="font-bold text-gray-900 mb-4">📈 Job Stats</h3>
                   <div className="space-y-3">
                     {[
                       { label: "Total Candidates",  value: candidates.length },
                       { label: "A-Tier Candidates", value: candidates.filter(c => c.tier?.includes("A")).length },
-                      { label: "Average Score",     value: candidates.length ? Math.round(candidates.reduce((a,c) => a + (c.aiScore||c.score||0), 0) / candidates.length) + "/100" : "—" },
-                      { label: "Min Required Score",value: `${job.minAiScore || 60}/100` },
-                      { label: "HM Ready",          value: candidates.filter(c => c.status === "hm_ready").length },
-                      { label: "Rejected",          value: candidates.filter(c => c.status === "rejected").length },
+                      { label: "Average Score",     value: candidates.length ? Math.round(candidates.reduce((a,c)=>a+(c.aiScore||c.score||0),0)/candidates.length)+"/100" : "—" },
+                      { label: "Min Required Score",value: `${job.minAiScore||60}/100` },
+                      { label: "HM Ready",          value: candidates.filter(c=>c.status==="hm_ready").length },
+                      { label: "Question Bank",     value: `${questionBank.length} questions` },
                     ].map(s => (
                       <div key={s.label} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
                         <span className="text-sm text-gray-500">{s.label}</span>
@@ -312,15 +341,155 @@ export default function JobDetailPage() {
                     ))}
                   </div>
                 </div>
-
-                <p className="text-center text-gray-400 text-xs py-2">👈 Click a candidate on the left to view full details</p>
+                <p className="text-center text-gray-400 text-xs py-2">👈 Click a candidate to view details</p>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* OVERVIEW TAB */}
+      {/* ── QUESTION BANK TAB ── */}
+      {activeTab === "question-bank" && (
+        <div className="p-6 max-w-4xl">
+          {/* Header */}
+          <div className="flex items-start justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">📋 Question Bank</h2>
+              <p className="text-gray-500 text-sm mt-1">Add 10–20 questions. During screening, 8 will be picked randomly.</p>
+            </div>
+            <button onClick={saveQuestionBank} disabled={savingBank || questionBank.length === 0}
+              className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${bankSaved ? "bg-emerald-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700"} disabled:opacity-50`}>
+              {savingBank ? "Saving..." : bankSaved ? "✅ Saved!" : "💾 Save Question Bank"}
+            </button>
+          </div>
+
+          {/* Stats bar */}
+          <div className="grid grid-cols-4 gap-3 mb-6">
+            {[
+              { label: "Total",  value: questionBank.length, max: 20, color: "text-gray-900",    bg: "bg-gray-50",     border: "border-gray-100" },
+              { label: "🟢 Easy",   value: easyCount,          max: 20, color: "text-emerald-600", bg: "bg-emerald-50",  border: "border-emerald-100" },
+              { label: "🟡 Medium", value: mediumCount,        max: 20, color: "text-amber-600",   bg: "bg-amber-50",    border: "border-amber-100" },
+              { label: "🔴 Hard",   value: hardCount,          max: 20, color: "text-red-600",     bg: "bg-red-50",      border: "border-red-100" },
+            ].map(s => (
+              <div key={s.label} className={`${s.bg} border ${s.border} rounded-2xl p-4 text-center`}>
+                <div className={`text-2xl font-black ${s.color}`}>{s.value}</div>
+                <div className="text-xs text-gray-500 mt-1 font-medium">{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Capacity warning */}
+          {questionBank.length > 0 && questionBank.length < 8 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 flex items-center gap-3">
+              <span className="text-xl">⚠️</span>
+              <p className="text-sm text-amber-700 font-medium">Add at least 8 questions to enable random selection. Currently have {questionBank.length}.</p>
+            </div>
+          )}
+          {questionBank.length >= 8 && questionBank.length < 10 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 flex items-center gap-3">
+              <span className="text-xl">💡</span>
+              <p className="text-sm text-blue-700 font-medium">Good start! We recommend 10–20 questions for better variety in random selection.</p>
+            </div>
+          )}
+          {questionBank.length >= 10 && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4 flex items-center gap-3">
+              <span className="text-xl">✅</span>
+              <p className="text-sm text-emerald-700 font-medium">Great! {questionBank.length} questions in bank. During screening, 8 will be randomly selected.</p>
+            </div>
+          )}
+
+          {/* Add new question */}
+          <div className="bg-white rounded-2xl border border-gray-100 p-5 mb-5">
+            <h3 className="font-bold text-gray-900 mb-4">➕ Add Question</h3>
+            <div className="space-y-3">
+              <textarea value={newQuestion.text}
+                onChange={e => setNewQuestion({...newQuestion, text: e.target.value})}
+                onKeyDown={e => { if (e.key === "Enter" && e.ctrlKey) addQuestion(); }}
+                placeholder="Type your question here... (Ctrl+Enter to add)"
+                rows={2}
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              <div className="flex gap-3 items-end">
+                <div className="flex-1">
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Difficulty</label>
+                  <div className="flex gap-2">
+                    {(["easy","medium","hard"] as const).map(d => (
+                      <button key={d} onClick={() => setNewQuestion({...newQuestion, difficulty: d})}
+                        className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all capitalize ${newQuestion.difficulty === d ? (d === "easy" ? "bg-emerald-600 text-white border-emerald-600" : d === "medium" ? "bg-amber-500 text-white border-amber-500" : "bg-red-600 text-white border-red-600") : DIFFICULTY_COLORS[d]}`}>
+                        {d === "easy" ? "🟢" : d === "medium" ? "🟡" : "🔴"} {d}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Category</label>
+                  <select value={newQuestion.category} onChange={e => setNewQuestion({...newQuestion, category: e.target.value})}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <button onClick={addQuestion} disabled={!newQuestion.text.trim() || questionBank.length >= 20}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 transition-all disabled:opacity-50">
+                  Add
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Question list */}
+          {questionBank.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center text-gray-400">
+              <div className="text-5xl mb-4">❓</div>
+              <p className="font-medium">No questions added yet</p>
+              <p className="text-sm mt-1">Add 10–20 questions above. They'll be randomly shuffled during screening.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {questionBank.map((q, idx) => (
+                <div key={idx} className="bg-white rounded-2xl border border-gray-100 p-4 flex gap-4">
+                  {/* Number */}
+                  <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-black shrink-0 mt-0.5">
+                    {idx + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    {/* Question text — editable */}
+                    <textarea value={q.text}
+                      onChange={e => updateQuestion(idx, "text", e.target.value)}
+                      rows={2} className="w-full text-sm text-gray-800 font-medium bg-transparent border-0 focus:outline-none resize-none p-0" />
+                    <div className="flex gap-2 mt-2">
+                      {/* Difficulty toggle */}
+                      <select value={q.difficulty} onChange={e => updateQuestion(idx, "difficulty", e.target.value)}
+                        className={`text-xs font-bold px-2.5 py-1 rounded-full border cursor-pointer focus:outline-none ${DIFFICULTY_COLORS[q.difficulty]}`}>
+                        <option value="easy">🟢 Easy</option>
+                        <option value="medium">🟡 Medium</option>
+                        <option value="hard">🔴 Hard</option>
+                      </select>
+                      {/* Category */}
+                      <select value={q.category} onChange={e => updateQuestion(idx, "category", e.target.value)}
+                        className="text-xs text-gray-500 bg-gray-50 border border-gray-200 px-2.5 py-1 rounded-full cursor-pointer focus:outline-none">
+                        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <button onClick={() => removeQuestion(idx)}
+                    className="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded-xl transition-all shrink-0 text-sm">
+                    🗑
+                  </button>
+                </div>
+              ))}
+
+              {/* Save button at bottom too */}
+              <div className="flex justify-end pt-2">
+                <button onClick={saveQuestionBank} disabled={savingBank}
+                  className={`px-6 py-3 rounded-xl font-bold text-sm transition-all ${bankSaved ? "bg-emerald-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700"} disabled:opacity-50`}>
+                  {savingBank ? "Saving..." : bankSaved ? "✅ Saved!" : "💾 Save Question Bank"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── OVERVIEW TAB ── */}
       {activeTab === "overview" && (
         <div className="p-6 max-w-3xl space-y-5">
           <div className="bg-white rounded-2xl p-6 border border-gray-100">
@@ -352,46 +521,73 @@ export default function JobDetailPage() {
   );
 }
 
-// ─── Candidate Detail Panel ───────────────────────────────────────────────
+// ── Candidate Panel ───────────────────────────────────────────
 interface PanelProps {
-  candidate: Candidate; job: Job;
-  API: string; token: string;
-  onStatusChange: (s: string) => void;
-  onDelete: () => void;
-  onUpdate: (c: Candidate) => void;
+  candidate: Candidate; job: Job; API: string; token: string;
+  onStatusChange: (s: string) => void; onDelete: () => void; onUpdate: (c: Candidate) => void;
 }
 
 function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, onUpdate }: PanelProps) {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("profile");
+  const [tab, setTab]             = useState("profile");
   const [questions, setQuestions] = useState<string[]>(candidate.interviewQuestions || []);
   const [generatingQ, setGeneratingQ] = useState(false);
-  const [answers, setAnswers] = useState<string[]>([]);
+  const [answers, setAnswers]     = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [screeningResult, setScreeningResult] = useState<{ screeningScore: number; combinedScore: number; status: string } | null>(null);
+  const [screeningResult, setScreeningResult] = useState<any>(null);
 
-  const score = candidate.aiScore || candidate.score || 0;
-  const tierKey = candidate.tier?.replace(/-?Tier$/i, "");
-  const tierBadge = ({ A: "bg-emerald-100 text-emerald-700", B: "bg-blue-100 text-blue-700", C: "bg-amber-100 text-amber-700" } as any)[tierKey] || "bg-gray-100 text-gray-600";
+  // ── Question mode toggle ──────────────────────────────────────
+  const [questionMode, setQuestionMode]   = useState<"ai" | "bank">("ai");
+  const [difficulty, setDifficulty]       = useState<"easy"|"medium"|"hard">("medium");
+  const [bankDifficulty, setBankDifficulty] = useState<"all"|"easy"|"medium"|"hard">("all");
+  const [bankAvailable, setBankAvailable] = useState<boolean>((job.questionBank?.length ?? 0) >= 8);
+
+  const score    = candidate.aiScore || candidate.score || 0;
+  const tierKey  = candidate.tier?.replace(/-?Tier$/i, "");
+  const tierBadge = ({ A:"bg-emerald-100 text-emerald-700", B:"bg-blue-100 text-blue-700", C:"bg-amber-100 text-amber-700" } as any)[tierKey] || "bg-gray-100 text-gray-600";
   const currentStage = STAGES.find(s => s.value === (candidate.status || "cv_uploaded")) || STAGES[0];
-  const hasAnswers = (candidate.screeningAnswers?.length ?? 0) > 0;
+  const hasAnswers   = (candidate.screeningAnswers?.length ?? 0) > 0;
 
-  async function generateQuestions() {
+  const difficultyConfig = {
+    easy:   { icon: "🟢", label: "Easy",   color: "bg-emerald-100 text-emerald-700 border-emerald-200", active: "bg-emerald-600 text-white" },
+    medium: { icon: "🟡", label: "Medium", color: "bg-amber-100 text-amber-700 border-amber-200",       active: "bg-amber-500 text-white" },
+    hard:   { icon: "🔴", label: "Hard",   color: "bg-red-100 text-red-700 border-red-200",             active: "bg-red-600 text-white" },
+  };
+
+  async function generateAIQuestions() {
     setGeneratingQ(true);
     try {
-      const res = await fetch(`${API}/candidates/${candidate._id}/questions`, {
+      const res  = await fetch(`${API}/candidates/${candidate._id}/questions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ jobTitle: job.title, skills: candidate.topSkills }),
+        body: JSON.stringify({
+          jobTitle: job.title, skills: candidate.topSkills, difficulty,
+          difficultyPrompt: `Generate 8 ${difficulty.toUpperCase()} difficulty interview questions.`,
+        }),
       });
       const data = await res.json();
-      const qs = data.questions || [];
-      setQuestions(qs);
-      setAnswers(new Array(qs.length).fill(""));
+      const qs   = data.questions || [];
+      setQuestions(qs); setAnswers(new Array(qs.length).fill(""));
       onUpdate({ ...candidate, interviewQuestions: qs, status: "questions_sent" });
       onStatusChange("questions_sent");
       setTab("screening");
     } catch { alert("Failed to generate questions."); }
+    finally { setGeneratingQ(false); }
+  }
+
+  async function generateBankQuestions() {
+    setGeneratingQ(true);
+    try {
+      const url = `${API}/jobs/${job._id}/question-bank/random${bankDifficulty !== "all" ? `?difficulty=${bankDifficulty}` : ""}`;
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) { alert(data.message || "Could not load questions from bank."); setGeneratingQ(false); return; }
+      const qs = data.questions || [];
+      setQuestions(qs); setAnswers(new Array(qs.length).fill(""));
+      onUpdate({ ...candidate, interviewQuestions: qs, status: "questions_sent" });
+      onStatusChange("questions_sent");
+      setTab("screening");
+    } catch { alert("Failed to load questions from bank."); }
     finally { setGeneratingQ(false); }
   }
 
@@ -400,13 +596,13 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
     setSubmitting(true);
     try {
       const payload = questions.map((q, i) => ({ question: q, answer: answers[i] }));
-      const res = await fetch(`${API}/candidates/${candidate._id}/answers`, {
+      const res  = await fetch(`${API}/candidates/${candidate._id}/answers`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ answers: payload }),
       });
       const data = await res.json();
-      setScreeningResult({ screeningScore: data.screeningScore, combinedScore: data.combinedScore, status: data.status });
+      setScreeningResult(data);
       onUpdate({ ...candidate, ...data.candidate });
       onStatusChange(data.status);
     } catch { alert("Failed to submit answers."); }
@@ -415,6 +611,7 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
 
   return (
     <div className="h-full flex flex-col">
+      {/* Header */}
       <div className="bg-white border-b border-gray-100 p-5">
         <div className="flex items-start gap-4">
           <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${tierKey === "A" ? "from-emerald-400 to-emerald-600" : tierKey === "B" ? "from-blue-400 to-blue-600" : "from-amber-400 to-amber-600"} flex items-center justify-center text-white font-bold text-lg shrink-0`}>
@@ -429,7 +626,6 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
             <div className="flex gap-3 text-xs text-gray-500 mt-1 flex-wrap">
               <span>✉️ {candidate.email}</span>
               {candidate.domain && <span>🏷️ {candidate.domain}</span>}
-              {candidate.seniority && <span>🎯 {candidate.seniority}</span>}
               {candidate.experienceYears ? <span>📅 {candidate.experienceYears}y exp</span> : null}
             </div>
           </div>
@@ -442,22 +638,20 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
         <div className="mt-4 flex items-center gap-1">
           {STAGES.filter(s => s.value !== "rejected").map((s) => {
             const currentIdx = STAGES.findIndex(st => st.value === (candidate.status || "cv_uploaded"));
-            const stageIdx = STAGES.findIndex(st => st.value === s.value);
-            const isActive = stageIdx <= currentIdx;
+            const stageIdx   = STAGES.findIndex(st => st.value === s.value);
             return (
               <div key={s.value} className="flex-1 flex flex-col items-center gap-1">
-                <div className={`h-1.5 w-full rounded-full transition-all ${isActive ? "bg-blue-500" : "bg-gray-200"}`} />
-                <span className={`text-xs hidden lg:block truncate w-full text-center ${isActive ? "text-blue-600 font-medium" : "text-gray-400"}`}>{s.label}</span>
+                <div className={`h-1.5 w-full rounded-full ${stageIdx <= currentIdx ? "bg-blue-500" : "bg-gray-200"}`} />
               </div>
             );
           })}
         </div>
 
         <div className="flex gap-2 mt-4 flex-wrap">
-          {!hasAnswers && questions.length === 0 && (candidate.status === "ai_screened" || candidate.status === "cv_uploaded") && (
-            <button onClick={generateQuestions} disabled={generatingQ}
-              className="bg-purple-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-purple-700 transition-all disabled:opacity-60">
-              {generatingQ ? "Generating..." : "✨ Generate Questions"}
+          {!hasAnswers && questions.length === 0 && (
+            <button onClick={() => setTab("generate")}
+              className="bg-purple-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-purple-700 transition-all">
+              ✨ Generate Questions
             </button>
           )}
           {questions.length > 0 && !hasAnswers && (
@@ -466,35 +660,32 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
             </button>
           )}
           {(candidate.status === "answers_submitted" || candidate.status === "hm_ready") && (
-            <button onClick={() => onStatusChange("hm_ready")}
-              className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-700 transition-all">
+            <button onClick={() => onStatusChange("hm_ready")} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-emerald-700 transition-all">
               ✓ Move to HM Ready
             </button>
           )}
-          <button onClick={() => onStatusChange("rejected")}
-            className="border border-red-200 text-red-500 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-red-50 transition-all">
-            Reject
-          </button>
-          <button onClick={() => navigate(`/candidates/${candidate._id}`)}
-            className="border border-gray-200 text-gray-600 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-all ml-auto">
-            Full Profile →
-          </button>
+          <button onClick={() => onStatusChange("rejected")} className="border border-red-200 text-red-500 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-red-50 transition-all">Reject</button>
+          <button onClick={() => navigate(`/candidates/${candidate._id}`)} className="border border-gray-200 text-gray-600 px-4 py-2 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-all ml-auto">Full Profile →</button>
           <button onClick={onDelete} className="text-gray-400 hover:text-red-500 px-2 py-2 rounded-xl text-sm transition-all">🗑</button>
         </div>
       </div>
 
+      {/* Tabs */}
       <div className="bg-white border-b border-gray-100 px-5">
         <div className="flex gap-5">
-          {["profile", "screening", "result"].map(t => (
+          {["profile","generate","screening","result"].map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`py-2.5 text-sm font-semibold capitalize border-b-2 transition-all ${tab === t ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
-              {t === "screening" ? `Screening${questions.length > 0 ? ` (${questions.length}Q)` : ""}` : t === "result" && hasAnswers ? `Result ✓` : t}
+              {t === "generate" ? "Generate Questions" : t === "screening" ? `Screening${questions.length > 0 ? ` (${questions.length}Q)` : ""}` : t === "result" && hasAnswers ? "Result ✓" : t}
             </button>
           ))}
         </div>
       </div>
 
+      {/* Content */}
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
+
+        {/* PROFILE */}
         {tab === "profile" && (
           <>
             <div className="bg-white rounded-2xl p-5 border border-gray-100">
@@ -528,15 +719,117 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
           </>
         )}
 
+        {/* GENERATE QUESTIONS */}
+        {tab === "generate" && (
+          <div className="space-y-4">
+            <h3 className="font-bold text-gray-900 text-lg">Generate Interview Questions</h3>
+
+            {/* Mode Toggle */}
+            <div className="bg-white rounded-2xl border border-gray-100 p-1.5 flex gap-1">
+              <button onClick={() => setQuestionMode("ai")}
+                className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${questionMode === "ai" ? "bg-blue-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+                🤖 AI Generated
+              </button>
+              <button onClick={() => setQuestionMode("bank")}
+                disabled={!bankAvailable}
+                className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${questionMode === "bank" ? "bg-purple-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-700"} disabled:opacity-40`}>
+                📋 From Job Bank
+                {!bankAvailable && <span className="text-xs opacity-70">(min 8 needed)</span>}
+              </button>
+            </div>
+
+            {/* AI Mode */}
+            {questionMode === "ai" && (
+              <div className="bg-blue-50 rounded-2xl border border-blue-100 p-5 space-y-4">
+                <div>
+                  <p className="text-sm font-bold text-blue-800 mb-1">🤖 AI will generate 8 questions based on:</p>
+                  <p className="text-xs text-blue-600">Candidate's skills, role, and selected difficulty level</p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Select Difficulty</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["easy","medium","hard"] as const).map(d => (
+                      <button key={d} onClick={() => setDifficulty(d)}
+                        className={`p-3 rounded-xl border-2 text-left transition-all ${difficulty === d ? difficultyConfig[d].active + " border-current" : difficultyConfig[d].color}`}>
+                        <div className="text-base mb-1">{difficultyConfig[d].icon}</div>
+                        <div className="font-bold text-sm capitalize">{d}</div>
+                        <div className="text-xs mt-0.5 opacity-70">
+                          {d === "easy" ? "0–2 yrs" : d === "medium" ? "3–5 yrs" : "6+ yrs"}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button onClick={generateAIQuestions} disabled={generatingQ}
+                  className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-all disabled:opacity-60">
+                  {generatingQ ? "⏳ AI Generating..." : `✨ Generate ${difficultyConfig[difficulty].label} Questions`}
+                </button>
+              </div>
+            )}
+
+            {/* Job Bank Mode */}
+            {questionMode === "bank" && (
+              <div className="bg-purple-50 rounded-2xl border border-purple-100 p-5 space-y-4">
+                <div>
+                  <p className="text-sm font-bold text-purple-800 mb-1">📋 Job Bank has {job.questionBank?.length || 0} questions</p>
+                  <p className="text-xs text-purple-600">8 will be randomly selected from the bank</p>
+                </div>
+
+                {/* Bank stats */}
+                <div className="grid grid-cols-3 gap-2">
+                  {(["easy","medium","hard"] as const).map(d => {
+                    const count = job.questionBank?.filter(q => q.difficulty === d).length || 0;
+                    return (
+                      <div key={d} className={`rounded-xl p-3 text-center border ${DIFFICULTY_COLORS[d]}`}>
+                        <div className="font-black text-lg">{count}</div>
+                        <div className="text-xs capitalize font-medium mt-0.5">{d}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Filter by difficulty */}
+                <div>
+                  <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Filter by Difficulty (optional)</p>
+                  <div className="flex gap-2">
+                    {(["all","easy","medium","hard"] as const).map(d => (
+                      <button key={d} onClick={() => setBankDifficulty(d)}
+                        className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all capitalize ${bankDifficulty === d ? "bg-purple-600 text-white border-purple-600" : "border-gray-200 text-gray-600 hover:border-purple-300"}`}>
+                        {d === "all" ? "All" : d === "easy" ? "🟢" : d === "medium" ? "🟡" : "🔴"} {d !== "all" ? d : ""}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button onClick={generateBankQuestions} disabled={generatingQ}
+                  className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition-all disabled:opacity-60">
+                  {generatingQ ? "⏳ Loading..." : "🎲 Pick 8 Random Questions from Bank"}
+                </button>
+
+                <p className="text-xs text-center text-purple-400">Questions are shuffled randomly each time</p>
+              </div>
+            )}
+
+            {/* No bank warning */}
+            {questionMode === "bank" && !bankAvailable && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
+                <p className="text-sm text-amber-700 font-medium">The question bank needs at least 8 questions.</p>
+                <button onClick={() => { /* navigate to question bank tab */ }}
+                  className="text-xs text-amber-600 underline mt-1">Go to Question Bank tab to add questions</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SCREENING */}
         {tab === "screening" && (
           <>
             {questions.length === 0 ? (
               <div className="bg-white rounded-2xl p-8 border border-gray-100 text-center">
                 <div className="text-5xl mb-3">❓</div>
                 <p className="font-semibold text-gray-700 mb-4">No questions generated yet</p>
-                <button onClick={generateQuestions} disabled={generatingQ}
-                  className="bg-purple-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-purple-700 disabled:opacity-60">
-                  {generatingQ ? "Generating..." : "✨ Generate AI Questions"}
+                <button onClick={() => setTab("generate")} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700">
+                  ✨ Generate Questions
                 </button>
               </div>
             ) : hasAnswers ? (
@@ -547,35 +840,35 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
             ) : (
               <>
                 <div className="bg-purple-50 rounded-xl p-4 border border-purple-100 text-sm text-purple-700">
-                  <strong>Instructions:</strong> Record the candidate's verbal answers below. AI will score each answer and determine if they're HM-ready.
+                  <strong>Instructions:</strong> Record the candidate's verbal answers. AI will score each and determine if HM-ready.
                 </div>
                 {questions.map((q, i) => (
                   <div key={i} className="bg-white rounded-xl p-5 border border-gray-100">
                     <div className="flex gap-3 mb-3">
-                      <span className="bg-purple-100 text-purple-700 font-bold text-xs w-7 h-7 rounded-full flex items-center justify-center shrink-0">{i + 1}</span>
+                      <span className="bg-purple-100 text-purple-700 font-bold text-xs w-7 h-7 rounded-full flex items-center justify-center shrink-0">{i+1}</span>
                       <p className="text-gray-800 text-sm font-medium leading-relaxed">{q}</p>
                     </div>
-                    <textarea value={answers[i] || ""} onChange={e => { const a = [...answers]; a[i] = e.target.value; setAnswers(a); }}
+                    <textarea value={answers[i] || ""} onChange={e => { const a=[...answers]; a[i]=e.target.value; setAnswers(a); }}
                       rows={3} placeholder="Type candidate's answer here..."
                       className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none" />
                   </div>
                 ))}
-                <button onClick={submitAnswers} disabled={submitting || answers.filter(a => a.trim()).length < questions.length}
+                <button onClick={submitAnswers} disabled={submitting || answers.filter(a=>a.trim()).length < questions.length}
                   className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition-all disabled:opacity-60 text-sm">
-                  {submitting ? "⏳ AI is scoring answers..." : `🚀 Submit ${questions.length} Answers for AI Scoring`}
+                  {submitting ? "⏳ AI scoring..." : `🚀 Submit ${questions.length} Answers`}
                 </button>
               </>
             )}
           </>
         )}
 
+        {/* RESULT */}
         {tab === "result" && (
           <>
             {!hasAnswers && !screeningResult ? (
               <div className="bg-white rounded-2xl p-8 border border-gray-100 text-center text-gray-400">
                 <div className="text-5xl mb-3">📊</div>
                 <p className="font-medium">No screening results yet</p>
-                <p className="text-sm mt-1">Complete the screening tab first</p>
               </div>
             ) : (
               <>
@@ -584,13 +877,10 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
                   <div className="grid grid-cols-3 gap-4 text-center mb-4">
                     <div><div className="text-3xl font-black text-blue-600">{score}</div><div className="text-xs text-gray-500 mt-1">AI Resume Score</div></div>
                     <div><div className="text-3xl font-black text-purple-600">{candidate.screeningScore ?? "—"}</div><div className="text-xs text-gray-500 mt-1">Screening Score</div></div>
-                    <div>
-                      <div className="text-3xl font-black text-emerald-600">{candidate.screeningScore != null ? Math.round((score + candidate.screeningScore) / 2) : "—"}</div>
-                      <div className="text-xs text-gray-500 mt-1">Combined Score</div>
-                    </div>
+                    <div><div className="text-3xl font-black text-emerald-600">{candidate.screeningScore != null ? Math.round((score + candidate.screeningScore)/2) : "—"}</div><div className="text-xs text-gray-500 mt-1">Combined Score</div></div>
                   </div>
                   <div className={`rounded-xl p-3 text-center font-bold text-sm ${candidate.status === "hm_ready" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                    {candidate.status === "hm_ready" ? "🎉 HM Ready — Candidate passed screening!" : "📋 Under Review — Combined score below threshold"}
+                    {candidate.status === "hm_ready" ? "🎉 HM Ready!" : "📋 Under Review"}
                   </div>
                 </div>
                 {candidate.screeningAnswers?.map((sa, i) => (
@@ -603,13 +893,11 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
                         </span>
                       )}
                     </div>
-                    <p className="text-gray-600 text-sm bg-gray-50 p-3 rounded-lg mb-2">{sa.answer}</p>
                     {sa.aiFeedback && <p className="text-xs text-gray-500 italic">💡 {sa.aiFeedback}</p>}
                   </div>
                 ))}
                 {candidate.status !== "hm_ready" && (
-                  <button onClick={() => onStatusChange("hm_ready")}
-                    className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all">
+                  <button onClick={() => onStatusChange("hm_ready")} className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all">
                     ✓ Manually Move to HM Ready
                   </button>
                 )}

@@ -16,9 +16,9 @@ router.get('/', protect, async (req, res) => {
     const enriched = candidates.map(c => {
       const obj = c.toObject();
       if (obj.jobId && typeof obj.jobId === 'object') {
-        obj.jobTitle      = obj.appliedFor || obj.jobId.title || '';
-        obj.jobDepartment = obj.jobId.department || '';
-        obj.jobLocation   = obj.jobId.location   || '';
+        obj.jobTitle       = obj.appliedFor || obj.jobId.title || '';
+        obj.jobDepartment  = obj.jobId.department || '';
+        obj.jobLocation    = obj.jobId.location   || '';
         obj.scoringWeights = obj.jobId.scoringWeights || { cvWeight:60, screeningWeight:40 };
       } else {
         obj.jobTitle = obj.appliedFor || '';
@@ -62,7 +62,7 @@ router.delete('/:id', protect, async (req, res) => {
 });
 
 // ── POST /api/candidates/:id/questions ────────────────────────
-// TECHNICAL QUESTIONS ONLY — no behavioral, no soft skills
+// ALL questions are purely TECHNICAL — based on difficulty level
 router.post('/:id/questions', protect, async (req, res) => {
   try {
     const candidate = await Candidate.findById(req.params.id);
@@ -71,71 +71,73 @@ router.post('/:id/questions', protect, async (req, res) => {
     const { jobTitle, skills, difficulty = 'medium' } = req.body;
     const role      = jobTitle || candidate.appliedFor || 'Software Engineer';
     const topSkills = (skills || candidate.topSkills || []).slice(0, 8);
+    const skill1    = topSkills[0] || role;
+    const skill2    = topSkills[1] || 'databases';
+    const skill3    = topSkills[2] || 'system design';
 
-    // Difficulty defines the TECHNICAL DEPTH — all questions are technical
     const difficultyGuide = {
       easy: `
-TECHNICAL DEPTH: EASY — Suitable for 0-2 years experience
-Question types (ALL must be technical):
-- Core concept questions: "How does X work internally?", "What is the difference between X and Y?"
-- Basic implementation: "How would you write a query to...?", "What happens when you call X?"
-- Common technical scenarios they should know from day 1
-- Examples: "What is the difference between ArrayList and LinkedList in Java?",
-  "Explain what a REST API is and how HTTP methods work",
-  "What is a foreign key in a database?",
-  "How does indexing improve query performance?"
-STRICTLY AVOID: General questions like "Tell me about yourself", "Where do you see yourself", "How do you work in a team"`,
+DIFFICULTY: EASY (0-2 years experience)
+Goal: Test foundational technical knowledge — can they explain HOW things work?
+Question types:
+- "What is X and how does it work internally?"
+- "What is the difference between X and Y?" (e.g. ArrayList vs LinkedList, TCP vs UDP)
+- "How would you write a basic [query/code/config] to do X?"
+- "What happens step-by-step when you do X?"
+DO NOT ASK: Design questions, team questions, career questions, behavioral questions
+EXAMPLE GOOD questions:
+- "Explain how an index works in a relational database and when you would use one"
+- "What is the difference between a stack and a queue? When would you use each?"
+- "How does HTTP request-response cycle work? What happens when you type a URL?"`,
 
       medium: `
-TECHNICAL DEPTH: MEDIUM — Suitable for 3-5 years experience
-Question types (ALL must be technical):
-- Architecture and design: "How would you design X?", "Which approach would you use for Y and why?"
-- Performance and optimization: "How would you optimize this query?", "What causes N+1 problem?"
-- Real implementation decisions: "How would you handle transactions across microservices?"
-- Debugging scenarios: "Given this error, what are the likely causes?"
-- Examples: "How does connection pooling work and why is it needed?",
-  "Explain SOLID principles with a code example from your experience",
-  "How would you implement caching to reduce database load?",
-  "What is the CAP theorem and how does it affect your database choice?"
-STRICTLY AVOID: Any soft skill, behavioral, or non-technical questions`,
+DIFFICULTY: MEDIUM (3-5 years experience)
+Goal: Test practical engineering judgment — can they solve real problems?
+Question types:
+- "How would you optimize X that is causing performance issues?"
+- "Walk me through how you would design X at a high level"
+- "What approach would you take for Y and what are the trade-offs?"
+- "You encounter this specific technical problem — how do you debug it?"
+DO NOT ASK: Basic definitions, career questions, team questions
+EXAMPLE GOOD questions:
+- "Your ${skill1} application is getting slow under load — walk me through your debugging approach"
+- "How would you implement caching for a high-traffic ${skill1} service? What are the trade-offs?"
+- "Explain the N+1 query problem in the context of ${skill2} and how you would prevent it"`,
 
       hard: `
-TECHNICAL DEPTH: HARD — Suitable for 6+ years experience
-Question types (ALL must be technical):
-- System design: "Design a system that handles X million requests per day"
-- Deep internals: "How does the JVM garbage collector work?", "Explain the internals of Kafka"
-- Complex trade-offs: "When would you choose eventual consistency over strong consistency?"
-- Production-level problems: "How would you debug a memory leak in production?",
-  "How would you migrate a live database with zero downtime?"
-- Architectural decisions: "How would you break this monolith into microservices?"
-- Examples: "Design a rate limiter for a public API",
-  "How would you implement distributed locking across multiple nodes?",
-  "Explain how you would handle a database that is running slow under peak load",
-  "How does Kubernetes manage pod scheduling and resource allocation?"
-STRICTLY AVOID: Any non-technical, behavioral, or generic questions`
+DIFFICULTY: HARD (6+ years experience)
+Goal: Test architectural thinking and production-level expertise
+Question types:
+- "Design a system for X that handles [scale/reliability requirement]"
+- "How would you architect X for zero-downtime migration/deployment?"
+- "What are the trade-offs between X approach and Y approach at scale?"
+- "How would you debug/diagnose X type of production problem?"
+DO NOT ASK: Basic concepts, definitions, career/behavioral questions
+EXAMPLE GOOD questions:
+- "Design a ${skill1} service that needs to handle 100K concurrent requests — walk through the architecture"
+- "How would you migrate a live ${skill2} database to a new schema without downtime?"
+- "Your ${skill1} service is experiencing intermittent latency spikes in production — systematic diagnosis approach?"`,
     };
 
-    const prompt = `You are a Senior Technical Architect conducting a technical interview.
-Generate exactly 8 TECHNICAL interview questions for this role.
+    const prompt = `You are a Principal Engineer and Technical Hiring Manager generating interview questions.
 
-ROLE: ${role}
-CANDIDATE SKILLS: ${topSkills.join(', ') || 'General Software Engineering'}
-SENIORITY: ${candidate.seniority || 'Mid'}
-EXPERIENCE: ${candidate.experienceYears || 'unknown'} years
-DOMAIN: ${candidate.domain || 'Software Engineering'}
+Role to hire for: ${role}
+Candidate's skills: ${topSkills.join(', ') || 'Software Engineering'}
+Candidate seniority: ${candidate.seniority || 'Mid'}
+Candidate experience: ${candidate.experienceYears || 'unknown'} years
+Domain: ${candidate.domain || 'Software Engineering'}
 
 ${difficultyGuide[difficulty] || difficultyGuide.medium}
 
-MANDATORY RULES:
-1. ALL 8 questions MUST be purely technical — no exceptions
-2. Questions should test actual hands-on knowledge, not just book definitions
-3. At least 3 questions must be specific to the candidate's listed skills: ${topSkills.slice(0,3).join(', ')||role}
-4. Questions should make the candidate think and demonstrate real experience
-5. Avoid questions that can be answered with a one-word or yes/no answer
-6. No questions about: career goals, team work, time management, motivation, or personal background
+MANDATORY REQUIREMENTS FOR ALL 8 QUESTIONS:
+1. Every single question must require technical knowledge to answer — no exceptions
+2. At least 3 questions must directly reference the candidate's specific skills: ${topSkills.slice(0,3).join(', ')||role}
+3. Questions must require demonstrated knowledge, not yes/no answers
+4. Questions should reveal gaps if the candidate is bluffing
+5. ZERO behavioral/soft skill/career questions — these are handled separately by HR
 
-Return ONLY a valid JSON array of exactly 8 question strings, no numbering, no markdown:
-["Technical question 1?","Technical question 2?","Technical question 3?","Technical question 4?","Technical question 5?","Technical question 6?","Technical question 7?","Technical question 8?"]`;
+Return ONLY a JSON array of exactly 8 questions, no numbering, no markdown:
+["Question 1?","Question 2?","Question 3?","Question 4?","Question 5?","Question 6?","Question 7?","Question 8?"]`;
 
     let questions = [];
 
@@ -145,54 +147,52 @@ Return ONLY a valid JSON array of exactly 8 question strings, no numbering, no m
         const resp = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           messages: [{ role:'user', content:prompt }],
-          temperature: difficulty==='easy'?0.2:difficulty==='hard'?0.4:0.3,
+          temperature: difficulty === 'easy' ? 0.15 : difficulty === 'hard' ? 0.4 : 0.25,
           max_tokens: 1000,
         });
         const text  = resp.choices[0].message.content.replace(/```json|```/g,'').trim();
         const match = text.match(/\[[\s\S]*\]/);
         if (match) {
           const parsed = JSON.parse(match[0]);
-          if (Array.isArray(parsed) && parsed.length >= 6) questions = parsed.slice(0,8);
+          if (Array.isArray(parsed) && parsed.length >= 6) {
+            questions = parsed.slice(0,8);
+          }
         }
       } catch (e) { console.error('[AI questions]', e.message); }
     }
 
-    // Fallback — still technical, skill-specific
+    // Fallback — always technical, always skill-specific
     if (questions.length === 0) {
-      const skill1 = topSkills[0] || role;
-      const skill2 = topSkills[1] || 'SQL';
-      const skill3 = topSkills[2] || 'REST API';
-
       const fallbacks = {
         easy: [
-          `What is the difference between ${skill1} and its main alternatives? When would you choose one over the other?`,
-          `How does memory management work in ${skill1}? What common memory issues have you encountered?`,
-          `Explain the CRUD operations in ${skill2}. Write an example SQL SELECT with a JOIN.`,
-          `What is the difference between a primary key and a foreign key in a relational database?`,
-          `How does HTTP work? Explain the difference between GET, POST, PUT, and DELETE.`,
-          `What is an index in a database and when should you use one?`,
-          `What is the difference between synchronous and asynchronous programming? Give a real example.`,
-          `How do you handle exceptions in ${skill1}? What is the difference between checked and unchecked exceptions?`,
+          `Explain how ${skill1} works internally — what happens under the hood when you execute a typical operation?`,
+          `What is the difference between ${skill1} and its main alternative? Give a scenario where you'd choose each.`,
+          `How does indexing work in ${skill2}? What are the trade-offs of adding too many indexes?`,
+          `Explain the difference between synchronous and asynchronous execution in ${skill1}. When does each matter?`,
+          `What happens at the network level when a client makes an HTTP request to a REST API? Walk through each step.`,
+          `What is a transaction in a database? Explain ACID properties with a concrete example.`,
+          `How does memory management work in ${skill1}? What common memory issues do developers encounter?`,
+          `What is the difference between a compiled and interpreted language? Where does ${skill1} fit?`,
         ],
         medium: [
-          `How would you optimize a slow ${skill2} query that is causing performance issues in production?`,
-          `Explain the N+1 query problem in ${skill1} and how you would fix it.`,
-          `How does connection pooling work and why is it critical for ${skill1} applications?`,
-          `Design a caching strategy for a high-traffic ${role} service. What would you cache and why?`,
-          `How would you implement pagination for a REST API that returns millions of records?`,
-          `What are the SOLID principles? Give a concrete example from your ${skill1} experience.`,
-          `How do you handle database transactions in ${skill1}? What is the difference between optimistic and pessimistic locking?`,
-          `Explain microservices vs monolith. For a ${role} project, what factors would drive your architecture decision?`,
+          `Your ${skill1} service is experiencing slow response times under load. Walk me through your systematic debugging approach.`,
+          `How would you design a caching layer for a ${role} service? What cache invalidation strategy would you use and why?`,
+          `Explain the N+1 query problem in the context of ${skill2}. How would you detect and fix it in production?`,
+          `How would you implement database connection pooling for a high-traffic ${skill1} application? What parameters matter?`,
+          `You need to add a new column to a ${skill2} table with 50 million rows in production. What is your approach?`,
+          `How would you handle distributed transactions across multiple microservices? What are the trade-offs vs 2PC?`,
+          `Describe a scenario where you would use ${skill3} vs a simpler solution. What are the operational trade-offs?`,
+          `How would you design a rate limiter for a ${role} API? What data structure and algorithm would you use?`,
         ],
         hard: [
-          `Design a system for ${role} that handles 1 million concurrent users. What are the key architectural decisions?`,
-          `How would you debug a memory leak in a production ${skill1} application with zero downtime?`,
-          `Explain the CAP theorem. For a ${role} system, how does it affect your choice of database?`,
-          `How would you migrate a live ${skill2} database to a new schema without taking downtime?`,
-          `Design a distributed rate limiter for an API serving 10,000 requests per second.`,
-          `How does the ${skill1} runtime/compiler optimize code internally? What are the performance implications?`,
-          `How would you implement distributed locking in a microservices environment? What are the pitfalls?`,
-          `Given a ${role} system where response times have increased 10x over 3 months, how would you diagnose and fix it?`,
+          `Design a ${skill1}-based system that handles 500K concurrent users. Walk through the architecture, data flow, and failure modes.`,
+          `Your ${skill1} production service has intermittent P99 latency spikes every 4 hours. How do you diagnose and resolve this systematically?`,
+          `How would you migrate a live ${skill2} database from schema version 1 to version 2 with zero downtime and rollback capability?`,
+          `Design a distributed job queue for a ${role} system. How do you handle exactly-once execution, failures, and horizontal scaling?`,
+          `Explain the CAP theorem and how it applies to choosing ${skill2} for a ${role} use case at scale.`,
+          `How would you implement multi-region active-active deployment for a ${skill1} service? What are the consistency trade-offs?`,
+          `Your ${skill1} service is leaking memory in production — 200MB per hour. Walk through your diagnosis and resolution process.`,
+          `Design the data architecture for a ${role} system that needs to handle both OLTP (transactions) and OLAP (analytics) workloads.`,
         ],
       };
       questions = fallbacks[difficulty] || fallbacks.medium;
@@ -212,54 +212,54 @@ Return ONLY a valid JSON array of exactly 8 question strings, no numbering, no m
 });
 
 // ── POST /api/candidates/:id/answers ─────────────────────────
-// Combined score = CV score (60%) + Technical screening score (40%)
-// Both based on technical merit only
+// Final score = CV score (default 60%) + Technical screening (default 40%)
 router.post('/:id/answers', protect, async (req, res) => {
   try {
     const candidate = await Candidate.findById(req.params.id)
-      .populate('jobId', 'scoringWeights');
+      .populate('jobId', 'scoringWeights title');
     if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
 
     const { answers } = req.body;
     if (!answers?.length) return res.status(400).json({ message: 'No answers provided' });
 
-    // Configurable weights (default CV:60%, Screening:40%)
-    const weights        = candidate.jobId?.scoringWeights || { cvWeight:60, screeningWeight:40 };
-    const cvWeight       = (weights.cvWeight        || 60) / 100;
-    const screeningWeight = (weights.screeningWeight || 40) / 100;
+    // Get configured weights
+    const weights         = candidate.jobId?.scoringWeights || { cvWeight:60, screeningWeight:40 };
+    const cvWeight        = Math.min(100, Math.max(0, weights.cvWeight        || 60)) / 100;
+    const screeningWeight = Math.min(100, Math.max(0, weights.screeningWeight || 40)) / 100;
 
-    // Score answers using technical-only scoring
+    // Score the technical answers
     const { scoreScreeningAnswers } = require('../services/aiService');
     const { scoredAnswers, screeningScore } = await scoreScreeningAnswers(answers, {
-      appliedFor: candidate.appliedFor || 'Software Engineer',
+      appliedFor: candidate.appliedFor || candidate.jobId?.title || 'Software Engineer',
       topSkills:  candidate.topSkills  || [],
       domain:     candidate.domain     || '',
     });
 
-    // Screening breakdown averages
-    const screeningBreakdown = {
-      technical: Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.technical||0),0)/scoredAnswers.length),
-      depth:     Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.depth||0),0)/scoredAnswers.length),
-      relevance: Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.relevance||0),0)/scoredAnswers.length),
+    // Average breakdown across all answers
+    const avgBreakdown = {
+      technical: Math.round(scoredAnswers.reduce((a,s) => a+(s.scoreBreakdown?.technical||0), 0) / scoredAnswers.length),
+      depth:     Math.round(scoredAnswers.reduce((a,s) => a+(s.scoreBreakdown?.depth||0),     0) / scoredAnswers.length),
+      relevance: Math.round(scoredAnswers.reduce((a,s) => a+(s.scoreBreakdown?.relevance||0), 0) / scoredAnswers.length),
     };
 
-    // Combined score
+    // Final weighted combined score
     const cvScore       = candidate.aiScore || 0;
     const combinedScore = Math.round((cvScore * cvWeight) + (screeningScore * screeningWeight));
 
-    // Recommendation based on combined score
+    // Recommendation
     const recommendation =
       combinedScore >= 85 ? 'Strong Hire' :
       combinedScore >= 72 ? 'Hire'        :
       combinedScore >= 58 ? 'Consider'    :
       combinedScore >= 42 ? 'Weak Fit'    : 'Reject';
 
+    // Status: HM Ready if combined >= 60, else keep in answers_submitted
     const newStatus = combinedScore >= 60 ? 'hm_ready' : 'answers_submitted';
 
     const updated = await Candidate.findByIdAndUpdate(req.params.id, {
       screeningAnswers:    scoredAnswers,
       screeningScore,
-      screeningBreakdown,
+      screeningBreakdown:  avgBreakdown,
       combinedScore,
       recommendation,
       status:     newStatus,
@@ -271,18 +271,18 @@ router.post('/:id/answers', protect, async (req, res) => {
       userId:   req.user._id,
       action:   'ANSWERS_SUBMITTED',
       resource: 'candidates',
-      details:  `${candidate.name} CV:${cvScore} Screen:${screeningScore} Combined:${combinedScore} → ${recommendation}`.slice(0,150),
+      details:  `${candidate.name} | CV:${cvScore} Screen:${screeningScore} Combined:${combinedScore} → ${recommendation}`.slice(0,150),
     });
 
     res.json({
-      candidate: updated,
+      candidate:         updated,
       screeningScore,
-      screeningBreakdown,
+      screeningBreakdown: avgBreakdown,
       combinedScore,
       cvScore,
       recommendation,
-      status: newStatus,
-      weights: { cvWeight: weights.cvWeight, screeningWeight: weights.screeningWeight },
+      status:   newStatus,
+      weights:  { cvWeight: weights.cvWeight, screeningWeight: weights.screeningWeight },
     });
   } catch (err) {
     console.error('[answers]', err);
@@ -296,31 +296,34 @@ router.post('/:id/rescreen', protect, async (req, res) => {
     const candidate = await Candidate.findById(req.params.id);
     if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
 
-    const { screenResumeWithAI, calculateCVScore } = require('../services/aiService');
+    const { screenResumeWithAI, calculateCVScore, determineTier } = require('../services/aiService');
 
-    const resumeText = `Name: ${candidate.name}
-Email: ${candidate.email}
-Domain: ${candidate.domain||''}
-Seniority: ${candidate.seniority||''}
-Experience: ${candidate.experienceYears||0} years
-Skills: ${(candidate.topSkills||[]).join(', ')}
-Applied For: ${candidate.appliedFor||''}
-Summary: ${candidate.summary||''}`.trim();
+    const resumeText = [
+      `Name: ${candidate.name}`,
+      `Email: ${candidate.email}`,
+      `Domain: ${candidate.domain||''}`,
+      `Seniority: ${candidate.seniority||''}`,
+      `Experience: ${candidate.experienceYears||0} years`,
+      `Skills: ${(candidate.topSkills||[]).join(', ')}`,
+      `Applied For: ${candidate.appliedFor||''}`,
+      `Summary: ${candidate.summary||''}`,
+    ].join('\n');
 
     const ai = await screenResumeWithAI(resumeText, candidate.appliedFor||'');
-    if (!ai) return res.status(500).json({ message: 'AI screening failed' });
+    if (!ai) return res.status(500).json({ message: 'AI screening failed — check GROQ_API_KEY in Render environment' });
 
     const cvScore = calculateCVScore(ai.cvScoreBreakdown) || ai.aiScore || 0;
+    const tier    = determineTier(cvScore);
 
     const updated = await Candidate.findByIdAndUpdate(req.params.id, {
       aiScore:              cvScore,
       cvScoreBreakdown:     ai.cvScoreBreakdown    || {},
-      tier:                 ai.tier                || candidate.tier,
-      riskLevel:            ai.riskLevel           || candidate.riskLevel,
+      tier,
+      riskLevel:            ai.riskLevel           || candidate.riskLevel || 'medium',
       riskFlags:            ai.riskFlags           || {},
       summary:              (ai.summary            || '').slice(0,400),
       hmSummary:            (ai.hmSummary          || '').slice(0,600),
-      topSkills:            (ai.topSkills?.length?ai.topSkills:candidate.topSkills||[]).slice(0,10),
+      topSkills:            (ai.topSkills?.length ? ai.topSkills : candidate.topSkills||[]).slice(0,10),
       skillScores:          (ai.skillScores        || []).slice(0,8),
       strengths:            (ai.strengths          || []).slice(0,4),
       gaps:                 (ai.gaps               || []).slice(0,4),
@@ -331,14 +334,14 @@ Summary: ${candidate.summary||''}`.trim();
       frameworks:           (ai.frameworks         ||[]).slice(0,8),
       tools:                (ai.tools              ||[]).slice(0,8),
       interviewFocusAreas:  (ai.interviewFocusAreas||[]).slice(0,5),
-      missingMandatorySkills:(ai.riskFlags?.missingMandatorySkills||[]).slice(0,5),
+      missingMandatorySkills: (ai.riskFlags?.missingMandatorySkills||[]).slice(0,5),
       recommendation:       ai.recommendation      || '',
       recommendationReason: (ai.recommendationReason||'').slice(0,200),
       status:               'ai_screened',
       updatedAt:            new Date(),
     }, { new: true });
 
-    res.json({ candidate: updated, aiScore: updated.aiScore });
+    res.json({ candidate: updated, aiScore: updated.aiScore, tier: updated.tier });
   } catch (err) {
     console.error('[rescreen]', err);
     res.status(500).json({ message: err.message });

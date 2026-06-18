@@ -62,6 +62,7 @@ router.delete('/:id', protect, async (req, res) => {
 });
 
 // ── POST /api/candidates/:id/questions ────────────────────────
+// TECHNICAL QUESTIONS ONLY — no behavioral, no soft skills
 router.post('/:id/questions', protect, async (req, res) => {
   try {
     const candidate = await Candidate.findById(req.params.id);
@@ -71,35 +72,70 @@ router.post('/:id/questions', protect, async (req, res) => {
     const role      = jobTitle || candidate.appliedFor || 'Software Engineer';
     const topSkills = (skills || candidate.topSkills || []).slice(0, 8);
 
-    const difficultyInstructions = {
-      easy: `DIFFICULTY: EASY (0-2 years experience)
-- Basic concept definitions ("What is X?", "Explain Y")
-- Simple how-to questions
-- Fundamental knowledge checks
-- No system design or architecture questions`,
-      medium: `DIFFICULTY: MEDIUM (3-5 years experience)
-- Real-world scenario questions ("How would you handle X?")
-- Problem-solving and practical implementation
-- Trade-off comparison questions
-- Past experience questions`,
-      hard: `DIFFICULTY: HARD (6+ years experience)
-- System design questions ("Design a system for X")
-- Architecture decisions and trade-offs
-- Leadership and mentoring scenarios
-- Performance, scalability, cross-team collaboration`,
+    // Difficulty defines the TECHNICAL DEPTH — all questions are technical
+    const difficultyGuide = {
+      easy: `
+TECHNICAL DEPTH: EASY — Suitable for 0-2 years experience
+Question types (ALL must be technical):
+- Core concept questions: "How does X work internally?", "What is the difference between X and Y?"
+- Basic implementation: "How would you write a query to...?", "What happens when you call X?"
+- Common technical scenarios they should know from day 1
+- Examples: "What is the difference between ArrayList and LinkedList in Java?",
+  "Explain what a REST API is and how HTTP methods work",
+  "What is a foreign key in a database?",
+  "How does indexing improve query performance?"
+STRICTLY AVOID: General questions like "Tell me about yourself", "Where do you see yourself", "How do you work in a team"`,
+
+      medium: `
+TECHNICAL DEPTH: MEDIUM — Suitable for 3-5 years experience
+Question types (ALL must be technical):
+- Architecture and design: "How would you design X?", "Which approach would you use for Y and why?"
+- Performance and optimization: "How would you optimize this query?", "What causes N+1 problem?"
+- Real implementation decisions: "How would you handle transactions across microservices?"
+- Debugging scenarios: "Given this error, what are the likely causes?"
+- Examples: "How does connection pooling work and why is it needed?",
+  "Explain SOLID principles with a code example from your experience",
+  "How would you implement caching to reduce database load?",
+  "What is the CAP theorem and how does it affect your database choice?"
+STRICTLY AVOID: Any soft skill, behavioral, or non-technical questions`,
+
+      hard: `
+TECHNICAL DEPTH: HARD — Suitable for 6+ years experience
+Question types (ALL must be technical):
+- System design: "Design a system that handles X million requests per day"
+- Deep internals: "How does the JVM garbage collector work?", "Explain the internals of Kafka"
+- Complex trade-offs: "When would you choose eventual consistency over strong consistency?"
+- Production-level problems: "How would you debug a memory leak in production?",
+  "How would you migrate a live database with zero downtime?"
+- Architectural decisions: "How would you break this monolith into microservices?"
+- Examples: "Design a rate limiter for a public API",
+  "How would you implement distributed locking across multiple nodes?",
+  "Explain how you would handle a database that is running slow under peak load",
+  "How does Kubernetes manage pod scheduling and resource allocation?"
+STRICTLY AVOID: Any non-technical, behavioral, or generic questions`
     };
 
-    const prompt = `You are a senior technical interviewer. Generate exactly 8 interview questions.
+    const prompt = `You are a Senior Technical Architect conducting a technical interview.
+Generate exactly 8 TECHNICAL interview questions for this role.
 
-Role: ${role}
-Skills: ${topSkills.join(', ')||'general software engineering'}
-Seniority: ${candidate.seniority||'Mid'}
-Experience: ${candidate.experienceYears||'unknown'} years
+ROLE: ${role}
+CANDIDATE SKILLS: ${topSkills.join(', ') || 'General Software Engineering'}
+SENIORITY: ${candidate.seniority || 'Mid'}
+EXPERIENCE: ${candidate.experienceYears || 'unknown'} years
+DOMAIN: ${candidate.domain || 'Software Engineering'}
 
-${difficultyInstructions[difficulty]||difficultyInstructions.medium}
+${difficultyGuide[difficulty] || difficultyGuide.medium}
 
-Return ONLY a valid JSON array of exactly 8 question strings:
-["Question 1?","Question 2?","Question 3?","Question 4?","Question 5?","Question 6?","Question 7?","Question 8?"]`;
+MANDATORY RULES:
+1. ALL 8 questions MUST be purely technical — no exceptions
+2. Questions should test actual hands-on knowledge, not just book definitions
+3. At least 3 questions must be specific to the candidate's listed skills: ${topSkills.slice(0,3).join(', ')||role}
+4. Questions should make the candidate think and demonstrate real experience
+5. Avoid questions that can be answered with a one-word or yes/no answer
+6. No questions about: career goals, team work, time management, motivation, or personal background
+
+Return ONLY a valid JSON array of exactly 8 question strings, no numbering, no markdown:
+["Technical question 1?","Technical question 2?","Technical question 3?","Technical question 4?","Technical question 5?","Technical question 6?","Technical question 7?","Technical question 8?"]`;
 
     let questions = [];
 
@@ -109,29 +145,63 @@ Return ONLY a valid JSON array of exactly 8 question strings:
         const resp = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           messages: [{ role:'user', content:prompt }],
-          temperature: difficulty==='easy'?0.2:difficulty==='hard'?0.5:0.35,
+          temperature: difficulty==='easy'?0.2:difficulty==='hard'?0.4:0.3,
           max_tokens: 1000,
         });
         const text  = resp.choices[0].message.content.replace(/```json|```/g,'').trim();
         const match = text.match(/\[[\s\S]*\]/);
         if (match) {
           const parsed = JSON.parse(match[0]);
-          if (Array.isArray(parsed) && parsed.length >= 4) questions = parsed.slice(0,8);
+          if (Array.isArray(parsed) && parsed.length >= 6) questions = parsed.slice(0,8);
         }
       } catch (e) { console.error('[AI questions]', e.message); }
     }
 
+    // Fallback — still technical, skill-specific
     if (questions.length === 0) {
+      const skill1 = topSkills[0] || role;
+      const skill2 = topSkills[1] || 'SQL';
+      const skill3 = topSkills[2] || 'REST API';
+
       const fallbacks = {
-        easy:   [`What is ${topSkills[0]||role} and what is it used for?`,`Explain the basic concepts of ${topSkills[1]||'object-oriented programming'}.`,`How do you declare and use variables in your preferred language?`,`What is the difference between a function and a method?`,`What tools do you use for version control?`,`Describe your experience working in a team.`,`What is debugging and how do you fix a simple bug?`,`Where do you want to grow in the next 1-2 years?`],
-        medium: [`Walk me through your experience with ${topSkills[0]||role}.`,`Describe a challenging project and how you overcame obstacles.`,`How do you approach debugging complex production issues?`,`What design patterns have you used and why?`,`How do you ensure code quality in your projects?`,`Describe your experience with agile methodologies.`,`How would you handle changing requirements mid-project?`,`How do you collaborate with cross-functional teams?`],
-        hard:   [`Design a scalable ${topSkills[0]||'microservices'} architecture for high traffic.`,`Describe a time you led a complex technical initiative.`,`How would you migrate a monolithic app to microservices?`,`How do you ensure high availability in distributed systems?`,`Describe your approach to performance optimization at scale.`,`How do you mentor junior developers while delivering your own work?`,`What trade-offs exist between consistency and availability?`,`How would you handle a critical production incident with no clear root cause?`],
+        easy: [
+          `What is the difference between ${skill1} and its main alternatives? When would you choose one over the other?`,
+          `How does memory management work in ${skill1}? What common memory issues have you encountered?`,
+          `Explain the CRUD operations in ${skill2}. Write an example SQL SELECT with a JOIN.`,
+          `What is the difference between a primary key and a foreign key in a relational database?`,
+          `How does HTTP work? Explain the difference between GET, POST, PUT, and DELETE.`,
+          `What is an index in a database and when should you use one?`,
+          `What is the difference between synchronous and asynchronous programming? Give a real example.`,
+          `How do you handle exceptions in ${skill1}? What is the difference between checked and unchecked exceptions?`,
+        ],
+        medium: [
+          `How would you optimize a slow ${skill2} query that is causing performance issues in production?`,
+          `Explain the N+1 query problem in ${skill1} and how you would fix it.`,
+          `How does connection pooling work and why is it critical for ${skill1} applications?`,
+          `Design a caching strategy for a high-traffic ${role} service. What would you cache and why?`,
+          `How would you implement pagination for a REST API that returns millions of records?`,
+          `What are the SOLID principles? Give a concrete example from your ${skill1} experience.`,
+          `How do you handle database transactions in ${skill1}? What is the difference between optimistic and pessimistic locking?`,
+          `Explain microservices vs monolith. For a ${role} project, what factors would drive your architecture decision?`,
+        ],
+        hard: [
+          `Design a system for ${role} that handles 1 million concurrent users. What are the key architectural decisions?`,
+          `How would you debug a memory leak in a production ${skill1} application with zero downtime?`,
+          `Explain the CAP theorem. For a ${role} system, how does it affect your choice of database?`,
+          `How would you migrate a live ${skill2} database to a new schema without taking downtime?`,
+          `Design a distributed rate limiter for an API serving 10,000 requests per second.`,
+          `How does the ${skill1} runtime/compiler optimize code internally? What are the performance implications?`,
+          `How would you implement distributed locking in a microservices environment? What are the pitfalls?`,
+          `Given a ${role} system where response times have increased 10x over 3 months, how would you diagnose and fix it?`,
+        ],
       };
-      questions = fallbacks[difficulty]||fallbacks.medium;
+      questions = fallbacks[difficulty] || fallbacks.medium;
     }
 
     await Candidate.findByIdAndUpdate(req.params.id, {
-      interviewQuestions: questions, status:'questions_sent', updatedAt: new Date(),
+      interviewQuestions: questions,
+      status: 'questions_sent',
+      updatedAt: new Date(),
     });
 
     res.json({ questions, difficulty, count: questions.length });
@@ -142,7 +212,8 @@ Return ONLY a valid JSON array of exactly 8 question strings:
 });
 
 // ── POST /api/candidates/:id/answers ─────────────────────────
-// Uses enhanced 5-criteria scoring + weighted combined score
+// Combined score = CV score (60%) + Technical screening score (40%)
+// Both based on technical merit only
 router.post('/:id/answers', protect, async (req, res) => {
   try {
     const candidate = await Candidate.findById(req.params.id)
@@ -152,37 +223,36 @@ router.post('/:id/answers', protect, async (req, res) => {
     const { answers } = req.body;
     if (!answers?.length) return res.status(400).json({ message: 'No answers provided' });
 
-    // Get configurable weights (default CV:60%, Screening:40%)
-    const weights = candidate.jobId?.scoringWeights || { cvWeight:60, screeningWeight:40 };
-    const cvWeight        = (weights.cvWeight        || 60) / 100;
+    // Configurable weights (default CV:60%, Screening:40%)
+    const weights        = candidate.jobId?.scoringWeights || { cvWeight:60, screeningWeight:40 };
+    const cvWeight       = (weights.cvWeight        || 60) / 100;
     const screeningWeight = (weights.screeningWeight || 40) / 100;
 
-    // Use enhanced scoring from aiService
+    // Score answers using technical-only scoring
     const { scoreScreeningAnswers } = require('../services/aiService');
     const { scoredAnswers, screeningScore } = await scoreScreeningAnswers(answers, {
       appliedFor: candidate.appliedFor || 'Software Engineer',
       topSkills:  candidate.topSkills  || [],
+      domain:     candidate.domain     || '',
     });
 
-    // Calculate screening breakdown averages
+    // Screening breakdown averages
     const screeningBreakdown = {
-      technical:         Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.technical||0),0)/scoredAnswers.length),
-      communication:     Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.communication||0),0)/scoredAnswers.length),
-      problemSolving:    Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.problemSolving||0),0)/scoredAnswers.length),
-      roleUnderstanding: Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.roleUnderstanding||0),0)/scoredAnswers.length),
-      motivation:        Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.motivation||0),0)/scoredAnswers.length),
+      technical: Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.technical||0),0)/scoredAnswers.length),
+      depth:     Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.depth||0),0)/scoredAnswers.length),
+      relevance: Math.round(scoredAnswers.reduce((a,s)=>a+(s.scoreBreakdown?.relevance||0),0)/scoredAnswers.length),
     };
 
-    // Weighted combined score
+    // Combined score
     const cvScore       = candidate.aiScore || 0;
     const combinedScore = Math.round((cvScore * cvWeight) + (screeningScore * screeningWeight));
 
-    // Determine recommendation based on combined score
+    // Recommendation based on combined score
     const recommendation =
       combinedScore >= 85 ? 'Strong Hire' :
-      combinedScore >= 70 ? 'Hire'        :
-      combinedScore >= 55 ? 'Consider'    :
-      combinedScore >= 40 ? 'Weak Fit'    : 'Reject';
+      combinedScore >= 72 ? 'Hire'        :
+      combinedScore >= 58 ? 'Consider'    :
+      combinedScore >= 42 ? 'Weak Fit'    : 'Reject';
 
     const newStatus = combinedScore >= 60 ? 'hm_ready' : 'answers_submitted';
 
@@ -192,8 +262,8 @@ router.post('/:id/answers', protect, async (req, res) => {
       screeningBreakdown,
       combinedScore,
       recommendation,
-      status:      newStatus,
-      updatedAt:   new Date(),
+      status:     newStatus,
+      updatedAt:  new Date(),
     }, { new: true });
 
     await AuditLog.create({
@@ -228,7 +298,14 @@ router.post('/:id/rescreen', protect, async (req, res) => {
 
     const { screenResumeWithAI, calculateCVScore } = require('../services/aiService');
 
-    const resumeText = `Name: ${candidate.name}\nEmail: ${candidate.email}\nDomain: ${candidate.domain||''}\nSeniority: ${candidate.seniority||''}\nExperience: ${candidate.experienceYears||0} years\nSkills: ${(candidate.topSkills||[]).join(', ')}\nApplied For: ${candidate.appliedFor||''}\nSummary: ${candidate.summary||''}`.trim();
+    const resumeText = `Name: ${candidate.name}
+Email: ${candidate.email}
+Domain: ${candidate.domain||''}
+Seniority: ${candidate.seniority||''}
+Experience: ${candidate.experienceYears||0} years
+Skills: ${(candidate.topSkills||[]).join(', ')}
+Applied For: ${candidate.appliedFor||''}
+Summary: ${candidate.summary||''}`.trim();
 
     const ai = await screenResumeWithAI(resumeText, candidate.appliedFor||'');
     if (!ai) return res.status(500).json({ message: 'AI screening failed' });
@@ -250,10 +327,10 @@ router.post('/:id/rescreen', protect, async (req, res) => {
       technicalExperience:  (ai.technicalExperience  ||'').slice(0,200),
       leadershipExperience: (ai.leadershipExperience ||'').slice(0,200),
       cloudExpertise:       (ai.cloudExpertise       ||'').slice(0,200),
-      databases:            (ai.databases          || []).slice(0,8),
-      frameworks:           (ai.frameworks         || []).slice(0,8),
-      tools:                (ai.tools              || []).slice(0,8),
-      interviewFocusAreas:  (ai.interviewFocusAreas|| []).slice(0,5),
+      databases:            (ai.databases          ||[]).slice(0,8),
+      frameworks:           (ai.frameworks         ||[]).slice(0,8),
+      tools:                (ai.tools              ||[]).slice(0,8),
+      interviewFocusAreas:  (ai.interviewFocusAreas||[]).slice(0,5),
       missingMandatorySkills:(ai.riskFlags?.missingMandatorySkills||[]).slice(0,5),
       recommendation:       ai.recommendation      || '',
       recommendationReason: (ai.recommendationReason||'').slice(0,200),

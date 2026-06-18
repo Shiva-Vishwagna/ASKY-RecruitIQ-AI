@@ -19,6 +19,14 @@ const tierColors: Record<string, string> = {
   C: "bg-amber-100 text-amber-700 border-amber-200",
 };
 
+// ── Recommendation replaces Risk ─────────────────────────────
+const recColors: Record<string, string> = {
+  "Strong Hire": "bg-emerald-100 text-emerald-700",
+  "Hire":        "bg-blue-100 text-blue-700",
+  "Maybe":       "bg-amber-100 text-amber-700",
+  "No Hire":     "bg-red-100 text-red-700",
+};
+
 const STATUSES = [
   { value: "cv_uploaded",       label: "CV Uploaded",       color: "bg-gray-100 text-gray-600" },
   { value: "ai_screened",       label: "AI Screened",       color: "bg-blue-100 text-blue-700" },
@@ -41,6 +49,40 @@ function getSLABadge(days: number, status?: string) {
   return null;
 }
 
+// ── Suggest difficulty based on experience years ──────────────
+function suggestDifficulty(expYears?: number): "easy" | "medium" | "hard" {
+  if (!expYears || expYears <= 2) return "easy";
+  if (expYears <= 5) return "medium";
+  return "hard";
+}
+
+const difficultyConfig = {
+  easy: {
+    label: "Easy",
+    icon: "🟢",
+    color: "bg-emerald-100 text-emerald-700 border-emerald-200",
+    activeColor: "bg-emerald-600 text-white border-emerald-600",
+    desc: "Conceptual & fundamental questions",
+    prompt: "Generate 8 EASY interview questions focusing on basic concepts, definitions, and fundamental knowledge. Questions should be suitable for 0-2 years experience. Focus on: what is X, explain concept Y, basic syntax/usage.",
+  },
+  medium: {
+    label: "Medium",
+    icon: "🟡",
+    color: "bg-amber-100 text-amber-700 border-amber-200",
+    activeColor: "bg-amber-500 text-white border-amber-500",
+    desc: "Scenario-based & problem solving",
+    prompt: "Generate 8 MEDIUM difficulty interview questions focusing on real-world scenarios, problem-solving, and practical experience. Questions should be suitable for 3-5 years experience. Focus on: how would you handle X, describe a time when Y, explain your approach to Z.",
+  },
+  hard: {
+    label: "Hard",
+    icon: "🔴",
+    color: "bg-red-100 text-red-700 border-red-200",
+    activeColor: "bg-red-600 text-white border-red-600",
+    desc: "Architecture, design & advanced problems",
+    prompt: "Generate 8 HARD interview questions focusing on system design, architecture decisions, leadership, and advanced technical depth. Questions should be suitable for 6+ years experience. Focus on: design a system for X, how would you architect Y, tradeoffs between Z approaches, leading a team through X.",
+  },
+};
+
 // ── Quick Preview Panel ───────────────────────────────────────
 function QuickPreviewPanel({
   candidate, onClose, onViewFull, onStatusChange
@@ -57,12 +99,13 @@ function QuickPreviewPanel({
   const slaBadge = getSLABadge(days, candidate.status);
   const currentStatus = STATUSES.find(s => s.value === (candidate.status || "cv_uploaded")) || STATUSES[0];
   const currentStatusIdx = STATUSES.findIndex(s => s.value === (candidate.status || "cv_uploaded"));
+  const rec = candidate.recommendation || (score >= 80 ? "Strong Hire" : score >= 60 ? "Hire" : score >= 40 ? "Maybe" : "No Hire");
 
   return (
     <>
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
       <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 flex flex-col overflow-hidden">
-        {/* Panel Header */}
+        {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-5 py-4 text-white shrink-0">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-semibold opacity-70 uppercase tracking-wide">Quick Preview</span>
@@ -84,27 +127,32 @@ function QuickPreviewPanel({
           </div>
         </div>
 
-        {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {/* Key Info Row */}
-          <div className="grid grid-cols-3 gap-3">
+          {/* Key Info — Tier + Recommendation + Experience + Days */}
+          <div className="grid grid-cols-4 gap-2">
             <div className="bg-gray-50 rounded-xl p-3 text-center">
-              <div className={`text-xs font-bold px-2 py-1 rounded-full inline-block mb-1 ${tierColors[tierKey] || "bg-gray-100 text-gray-600"}`}>
-                {tierKey}-Tier
+              <div className={`text-xs font-bold px-1.5 py-1 rounded-full inline-block mb-1 ${tierColors[tierKey] || "bg-gray-100 text-gray-600"}`}>
+                {tierKey}
               </div>
               <div className="text-xs text-gray-500">Tier</div>
             </div>
             <div className="bg-gray-50 rounded-xl p-3 text-center">
-              <div className={`text-xs font-semibold px-2 py-1 rounded-full inline-block mb-1 capitalize ${candidate.riskLevel === "low" ? "bg-green-100 text-green-700" : candidate.riskLevel === "high" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
-                {candidate.riskLevel || "medium"}
+              <div className={`text-xs font-bold px-1.5 py-1 rounded-full inline-block mb-1 ${recColors[rec] || "bg-gray-100 text-gray-600"}`}>
+                {rec === "Strong Hire" ? "S.Hire" : rec}
               </div>
-              <div className="text-xs text-gray-500">Risk</div>
+              <div className="text-xs text-gray-500">AI Rec</div>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3 text-center">
+              <div className="text-sm font-black text-gray-900 mb-1">
+                {candidate.experienceYears ? `${candidate.experienceYears}y` : "—"}
+              </div>
+              <div className="text-xs text-gray-500">Exp</div>
             </div>
             <div className="bg-gray-50 rounded-xl p-3 text-center">
               {slaBadge ? (
-                <div className={`text-xs font-bold px-2 py-1 rounded-full inline-block mb-1 ${slaBadge.cls}`}>{slaBadge.label}</div>
+                <div className={`text-xs font-bold px-1.5 py-1 rounded-full inline-block mb-1 ${slaBadge.cls}`}>{slaBadge.label}</div>
               ) : (
-                <div className="text-xs font-semibold text-gray-600 mb-1">{days}d</div>
+                <div className="text-sm font-black text-gray-600 mb-1">{days}d</div>
               )}
               <div className="text-xs text-gray-500">In Stage</div>
             </div>
@@ -151,7 +199,7 @@ function QuickPreviewPanel({
             </div>
           </div>
 
-          {/* Candidate Details */}
+          {/* Experience Details */}
           {(candidate.domain || candidate.seniority || candidate.experienceYears) && (
             <div className="grid grid-cols-3 gap-3">
               {candidate.domain && (
@@ -205,7 +253,6 @@ function QuickPreviewPanel({
                   {candidate.strengths!.slice(0, 3).map((s, i) => (
                     <div key={i} className="text-xs text-gray-600 mb-1">• {s}</div>
                   ))}
-                  {(candidate.strengths!.length > 3) && <div className="text-xs text-gray-400">+{candidate.strengths!.length - 3} more</div>}
                 </div>
               )}
               {(candidate.gaps?.length ?? 0) > 0 && (
@@ -214,31 +261,18 @@ function QuickPreviewPanel({
                   {candidate.gaps!.slice(0, 3).map((g, i) => (
                     <div key={i} className="text-xs text-gray-600 mb-1">• {g}</div>
                   ))}
-                  {(candidate.gaps!.length > 3) && <div className="text-xs text-gray-400">+{candidate.gaps!.length - 3} more</div>}
                 </div>
               )}
             </div>
           )}
 
-          {/* Recommendation */}
-          {candidate.recommendation && (
-            <div className={`rounded-xl p-3 border text-center ${
-              candidate.recommendation === "Strong Hire" ? "bg-emerald-50 border-emerald-200" :
-              candidate.recommendation === "Hire" ? "bg-blue-50 border-blue-200" :
-              candidate.recommendation === "Maybe" ? "bg-amber-50 border-amber-200" :
-              "bg-red-50 border-red-200"}`}>
-              <div className="text-xs text-gray-500 mb-1">AI Recommendation</div>
-              <div className={`font-bold text-sm ${
-                candidate.recommendation === "Strong Hire" ? "text-emerald-700" :
-                candidate.recommendation === "Hire" ? "text-blue-700" :
-                candidate.recommendation === "Maybe" ? "text-amber-700" : "text-red-700"}`}>
-                {candidate.recommendation}
-              </div>
-            </div>
-          )}
+          {/* AI Recommendation */}
+          <div className={`rounded-xl p-3 border text-center ${recColors[rec] ? recColors[rec].replace("text-", "border-").replace("bg-", "border-") : "border-gray-200"} bg-opacity-50`}>
+            <div className="text-xs text-gray-500 mb-1">AI Recommendation</div>
+            <div className={`font-bold text-sm ${recColors[rec] || "text-gray-700"}`}>{rec}</div>
+          </div>
         </div>
 
-        {/* Footer */}
         <div className="p-4 border-t border-gray-100 bg-gray-50 shrink-0">
           <button onClick={onViewFull}
             className="w-full bg-blue-600 text-white py-2.5 rounded-xl font-bold hover:bg-blue-700 transition-all text-sm">
@@ -253,25 +287,24 @@ function QuickPreviewPanel({
 // ── Main Page ─────────────────────────────────────────────────
 export default function CandidatesPage() {
   const navigate = useNavigate();
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showFilters, setShowFilters] = useState(false);
+  const [candidates, setCandidates]         = useState<Candidate[]>([]);
+  const [loading, setLoading]               = useState(true);
+  const [showFilters, setShowFilters]       = useState(false);
   const [previewCandidate, setPreviewCandidate] = useState<Candidate | null>(null);
 
-  const [search, setSearch]             = useState("");
-  const [jobFilter, setJobFilter]       = useState("all");
-  const [tierFilter, setTierFilter]     = useState("all");
-  const [riskFilter, setRiskFilter]     = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [scoreMin, setScoreMin]         = useState(0);
-  const [scoreMax, setScoreMax]         = useState(100);
-  const [dateFrom, setDateFrom]         = useState("");
-  const [dateTo, setDateTo]             = useState("");
-  const [sortBy, setSortBy]             = useState("score-desc");
-  const [slaFilter, setSlaFilter]       = useState("all");
-  const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set());
-  const [bulkStatus, setBulkStatus]     = useState("");
-  const [bulkLoading, setBulkLoading]   = useState(false);
+  const [search, setSearch]               = useState("");
+  const [jobFilter, setJobFilter]         = useState("all");
+  const [tierFilter, setTierFilter]       = useState("all");
+  const [statusFilter, setStatusFilter]   = useState("all");
+  const [scoreMin, setScoreMin]           = useState(0);
+  const [scoreMax, setScoreMax]           = useState(100);
+  const [dateFrom, setDateFrom]           = useState("");
+  const [dateTo, setDateTo]               = useState("");
+  const [sortBy, setSortBy]               = useState("score-desc");
+  const [slaFilter, setSlaFilter]         = useState("all");
+  const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set());
+  const [bulkStatus, setBulkStatus]       = useState("");
+  const [bulkLoading, setBulkLoading]     = useState(false);
 
   const API   = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
@@ -321,11 +354,8 @@ export default function CandidatesPage() {
   }
 
   function toggleSelectAll() {
-    if (selectedIds.size === filtered.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(filtered.map(c => c._id)));
-    }
+    if (selectedIds.size === filtered.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(filtered.map(c => c._id)));
   }
 
   async function applyBulkStatus() {
@@ -333,32 +363,30 @@ export default function CandidatesPage() {
     if (!window.confirm(`Move ${selectedIds.size} candidate(s) to "${STATUSES.find(s => s.value === bulkStatus)?.label}"?`)) return;
     setBulkLoading(true);
     await Promise.all([...selectedIds].map(id => updateStatus(id, bulkStatus)));
-    setSelectedIds(new Set());
-    setBulkStatus("");
-    setBulkLoading(false);
+    setSelectedIds(new Set()); setBulkStatus(""); setBulkLoading(false);
   }
 
   async function bulkDelete() {
     if (!isAdmin || selectedIds.size === 0) return;
-    if (!window.confirm(`Delete ${selectedIds.size} candidate(s)? This cannot be undone.`)) return;
+    if (!window.confirm(`Delete ${selectedIds.size} candidate(s)?`)) return;
     setBulkLoading(true);
     await Promise.all([...selectedIds].map(id =>
       fetch(`${API}/candidates/${id}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } })
     ));
     setCandidates(prev => prev.filter(c => !selectedIds.has(c._id)));
-    setSelectedIds(new Set());
-    setBulkLoading(false);
+    setSelectedIds(new Set()); setBulkLoading(false);
   }
 
   function exportCSV() {
-    const headers = ["Name", "Email", "Applied For", "Department", "Score", "Tier", "Risk", "Status", "Days in Stage", "Date"];
+    const headers = ["Name","Email","Applied For","Department","Score","Tier","Recommendation","Experience","Status","Days in Stage","Date"];
     const rows = filtered.map(c => [
       c.name, c.email,
       c.jobTitle || c.appliedFor || "—",
       c.jobDepartment || "—",
       (c.aiScore||c.score||0),
       c.tier?.replace(/-?Tier$/i,""),
-      c.riskLevel,
+      c.recommendation || "—",
+      c.experienceYears ? `${c.experienceYears}y` : "—",
       c.status || "cv_uploaded",
       getDaysInStage(c),
       (c.createdAt||c.appliedAt) ? new Date(c.createdAt||c.appliedAt!).toLocaleDateString() : "—"
@@ -370,8 +398,7 @@ export default function CandidatesPage() {
 
   function resetFilters() {
     setSearch(""); setJobFilter("all"); setTierFilter("all");
-    setRiskFilter("all"); setStatusFilter("all");
-    setScoreMin(0); setScoreMax(100);
+    setStatusFilter("all"); setScoreMin(0); setScoreMax(100);
     setDateFrom(""); setDateTo(""); setSortBy("score-desc"); setSlaFilter("all");
   }
 
@@ -379,7 +406,6 @@ export default function CandidatesPage() {
     candidates.map(c => c.jobTitle || c.appliedFor || "").filter(Boolean)
   )).sort();
 
-  // ── SLA Counts (3 distinct buckets) ──────────────────────────
   const activeCandidates = candidates.filter(c => c.status !== "rejected" && c.status !== "hm_ready");
   const stuck7Count    = activeCandidates.filter(c => getDaysInStage(c) >= 7).length;
   const stuck5to6Count = activeCandidates.filter(c => getDaysInStage(c) >= 5 && getDaysInStage(c) < 7).length;
@@ -394,7 +420,6 @@ export default function CandidatesPage() {
       const matchSearch   = c.name?.toLowerCase().includes(search.toLowerCase()) || c.email?.toLowerCase().includes(search.toLowerCase());
       const matchJob      = jobFilter === "all" || appliedFor === jobFilter;
       const matchTier     = tierFilter === "all" || c.tier?.replace(/-?Tier$/i,"") === tierFilter;
-      const matchRisk     = riskFilter === "all" || c.riskLevel === riskFilter;
       const matchStatus   = statusFilter === "all" || (c.status || "cv_uploaded") === statusFilter;
       const matchScore    = s >= scoreMin && s <= scoreMax;
       const matchDateFrom = !dateFrom || (dateStr && new Date(dateStr) >= new Date(dateFrom));
@@ -404,7 +429,7 @@ export default function CandidatesPage() {
         : slaFilter === "stuck5"  ? (days >= 5 && days < 7 && c.status !== "rejected" && c.status !== "hm_ready")
         : slaFilter === "ontrack" ? (days < 5 && c.status !== "rejected" && c.status !== "hm_ready")
         : true;
-      return matchSearch && matchJob && matchTier && matchRisk && matchStatus && matchScore && matchDateFrom && matchDateTo && matchSLA;
+      return matchSearch && matchJob && matchTier && matchStatus && matchScore && matchDateFrom && matchDateTo && matchSLA;
     })
     .sort((a, b) => {
       if (sortBy === "score-desc") return (b.aiScore||b.score||0) - (a.aiScore||a.score||0);
@@ -413,11 +438,12 @@ export default function CandidatesPage() {
       if (sortBy === "date-desc")  return new Date(b.createdAt||b.appliedAt||0).getTime() - new Date(a.createdAt||a.appliedAt||0).getTime();
       if (sortBy === "date-asc")   return new Date(a.createdAt||a.appliedAt||0).getTime() - new Date(b.createdAt||b.appliedAt||0).getTime();
       if (sortBy === "sla-desc")   return getDaysInStage(b) - getDaysInStage(a);
+      if (sortBy === "exp-desc")   return (b.experienceYears||0) - (a.experienceYears||0);
       return 0;
     });
 
   const activeFilterCount = [
-    search, jobFilter !== "all", tierFilter !== "all", riskFilter !== "all",
+    search, jobFilter !== "all", tierFilter !== "all",
     statusFilter !== "all", scoreMin > 0, scoreMax < 100, dateFrom, dateTo, slaFilter !== "all"
   ].filter(Boolean).length;
 
@@ -426,7 +452,6 @@ export default function CandidatesPage() {
   return (
     <div className="min-h-screen bg-gray-50 p-6">
 
-      {/* Quick Preview Panel */}
       {previewCandidate && (
         <QuickPreviewPanel
           candidate={previewCandidate}
@@ -448,7 +473,7 @@ export default function CandidatesPage() {
         </div>
       </div>
 
-      {/* ── SLA Overview Bar (3 distinct buckets) ── */}
+      {/* SLA Overview */}
       <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <span className="text-sm font-bold text-gray-700">⏱️ SLA Overview</span>
@@ -457,21 +482,18 @@ export default function CandidatesPage() {
           )}
         </div>
         <div className="grid grid-cols-3 gap-3">
-          {/* Critical */}
           <button onClick={() => setSlaFilter(slaFilter === "stuck7" ? "all" : "stuck7")}
             className={`rounded-xl p-3 border-2 transition-all text-left ${slaFilter === "stuck7" ? "border-red-500 bg-red-50" : "border-red-100 bg-red-50 hover:border-red-300"}`}>
             <div className="text-2xl font-black text-red-600">{stuck7Count}</div>
             <div className="text-xs font-bold text-red-700 mt-0.5">🔴 Critical</div>
             <div className="text-xs text-red-400">Stuck 7+ days</div>
           </button>
-          {/* Warning */}
           <button onClick={() => setSlaFilter(slaFilter === "stuck5" ? "all" : "stuck5")}
             className={`rounded-xl p-3 border-2 transition-all text-left ${slaFilter === "stuck5" ? "border-amber-500 bg-amber-50" : "border-amber-100 bg-amber-50 hover:border-amber-300"}`}>
             <div className="text-2xl font-black text-amber-600">{stuck5to6Count}</div>
             <div className="text-xs font-bold text-amber-700 mt-0.5">🟡 Warning</div>
             <div className="text-xs text-amber-400">Stuck 5–6 days</div>
           </button>
-          {/* On Track */}
           <button onClick={() => setSlaFilter(slaFilter === "ontrack" ? "all" : "ontrack")}
             className={`rounded-xl p-3 border-2 transition-all text-left ${slaFilter === "ontrack" ? "border-emerald-500 bg-emerald-50" : "border-emerald-100 bg-emerald-50 hover:border-emerald-300"}`}>
             <div className="text-2xl font-black text-emerald-600">{onTrackCount}</div>
@@ -535,6 +557,7 @@ export default function CandidatesPage() {
             <option value="date-desc">Date: Newest</option>
             <option value="date-asc">Date: Oldest</option>
             <option value="sla-desc">Days in Stage: Most</option>
+            <option value="exp-desc">Experience: Most</option>
           </select>
           <button onClick={() => setShowFilters(!showFilters)}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${showFilters ? "bg-blue-600 text-white border-blue-600" : "border-gray-200 text-gray-700 hover:bg-gray-50"}`}>
@@ -562,14 +585,6 @@ export default function CandidatesPage() {
                 className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="all">All Tiers</option>
                 <option value="A">A-Tier</option><option value="B">B-Tier</option><option value="C">C-Tier</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Risk Level</label>
-              <select value={riskFilter} onChange={e => setRiskFilter(e.target.value)}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="all">All Risk</option>
-                <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
               </select>
             </div>
             <div>
@@ -638,7 +653,7 @@ export default function CandidatesPage() {
                     onChange={toggleSelectAll}
                     className="rounded accent-blue-600 cursor-pointer" />
                 </th>
-                {["Candidate", "Applied For", "AI Score", "Tier", "Risk", "Status", "In Stage", "Date", ""].map(h => (
+                {["Candidate", "Applied For", "AI Score", "Tier", "AI Rec", "Exp", "Status", "In Stage", "Date", ""].map(h => (
                   <th key={h} className="px-4 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -653,6 +668,7 @@ export default function CandidatesPage() {
                 const slaBadge = getSLABadge(days, c.status);
                 const isSelected = selectedIds.has(c._id);
                 const isPreview = previewCandidate?._id === c._id;
+                const rec = c.recommendation || (score >= 80 ? "Strong Hire" : score >= 60 ? "Hire" : score >= 40 ? "Maybe" : "No Hire");
 
                 return (
                   <tr key={c._id}
@@ -689,9 +705,16 @@ export default function CandidatesPage() {
                         {tierKey}-Tier
                       </span>
                     </td>
+                    {/* AI Recommendation replaces Risk */}
                     <td className="px-4 py-3.5 cursor-pointer" onClick={() => setPreviewCandidate(c)}>
-                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full capitalize ${c.riskLevel === "low" ? "bg-green-100 text-green-700" : c.riskLevel === "high" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
-                        {c.riskLevel || "medium"}
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${recColors[rec] || "bg-gray-100 text-gray-600"}`}>
+                        {rec}
+                      </span>
+                    </td>
+                    {/* Experience years */}
+                    <td className="px-4 py-3.5 cursor-pointer" onClick={() => setPreviewCandidate(c)}>
+                      <span className="text-sm font-semibold text-gray-700">
+                        {c.experienceYears ? `${c.experienceYears}y` : "—"}
                       </span>
                     </td>
                     <td className="px-4 py-3.5" onClick={e => e.stopPropagation()}>

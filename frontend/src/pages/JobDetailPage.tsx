@@ -47,17 +47,41 @@ const CATEGORIES = ["Technical","Behavioral","Situational","Leadership","Problem
 
 // ── Parse questions from plain text ──────────────────────────
 function parseQuestionsFromText(text: string): string[] {
-  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
   const questions: string[] = [];
+
+  // STRATEGY 1: "Question: [text] Answer:" pattern (common in structured Word files)
+  const qaPattern = /Question:\s*(.+?)(?:\s*Answer:|$)/gi;
+  let match;
+  while ((match = qaPattern.exec(text)) !== null) {
+    const q = match[1].trim().replace(/\s+/g, " ");
+    if (q.length > 15 && q.length < 600 && !questions.includes(q)) {
+      questions.push(q);
+    }
+  }
+  if (questions.length >= 3) return questions.slice(0, 20);
+
+  // STRATEGY 2: Numbered lines "1. text" or "1) text" or "Q1. text" (one per line)
+  const lines = text.split(/\n|\r\n|\r/).map(l => l.trim()).filter(Boolean);
   for (const line of lines) {
-    // Remove numbering like "1.", "1)", "Q1.", "Q1:", "-", "•"
     const cleaned = line
-      .replace(/^(Q\s*\d+[\.\:\)]\s*|[\d]+[\.\:\)]\s*|[-•*]\s*)/i, "")
+      .replace(/^(Q\s*\d+[\.\:\)]\s*|[\d]+[\.\:\)]\s*|[-•*→]\s*)/i, "")
+      .replace(/\s+/g, " ")
       .trim();
-    if (cleaned.length > 10 && cleaned.length < 500) {
+    if (cleaned.length > 15 && cleaned.length < 600 && !questions.includes(cleaned)) {
       questions.push(cleaned);
     }
   }
+  if (questions.length >= 3) return questions.slice(0, 20);
+
+  // STRATEGY 3: Extract sentences ending with "?"
+  const sentences = text.split(/(?<=[?])\s+/);
+  for (const s of sentences) {
+    const cleaned = s.trim().replace(/^\d+[\.\)]\s*/, "").replace(/\s+/g, " ");
+    if (cleaned.length > 20 && cleaned.length < 600 && cleaned.endsWith("?") && !questions.includes(cleaned)) {
+      questions.push(cleaned);
+    }
+  }
+
   return questions.slice(0, 20);
 }
 
@@ -174,40 +198,76 @@ export default function JobDetailPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setImporting(true);
+
+    async function extractDocxText(buffer: ArrayBuffer): Promise<string> {
+      // Load JSZip from CDN if not already present
+      if (!(window as any).JSZip) {
+        await new Promise<void>((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error("JSZip CDN failed"));
+          document.head.appendChild(s);
+        });
+      }
+      const zip     = await (window as any).JSZip.loadAsync(buffer);
+      const xmlFile = zip.file("word/document.xml");
+      if (!xmlFile) throw new Error("word/document.xml not found in docx");
+      const xml = await xmlFile.async("string");
+      // Strip XML tags and decode entities
+      return xml
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&apos;/g, "'")
+        .replace(/&quot;/g, """)
+        .replace(/&#x[0-9a-fA-F]+;/g, " ")
+        .replace(/&#[0-9]+;/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
     try {
       let text = "";
 
       if (file.name.endsWith(".txt")) {
-        // Plain text file
         text = await file.text();
+
       } else if (file.name.endsWith(".docx")) {
-        // DOCX — use mammoth via a simple ArrayBuffer read
-        // We extract text client-side using a basic DOCX XML parser
         const buffer = await file.arrayBuffer();
-        const zip    = await (window as any).JSZip?.loadAsync(buffer);
-        if (zip) {
-          const xml = await zip.file("word/document.xml")?.async("string");
-          if (xml) text = xml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-        } else {
-          // Fallback: just read as text
-          text = await file.text();
-        }
+        text = await extractDocxText(buffer);
+
       } else if (file.name.endsWith(".doc")) {
-        alert("Old .doc format not supported. Please save as .docx or .txt");
-        setImporting(false); return;
+        alert("Old .doc format is not supported.\nPlease open the file in Word, go to File → Save As → .docx or .txt, then upload again.");
+        setImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+
       } else {
         text = await file.text();
       }
 
+      if (!text || text.trim().length < 10) {
+        alert("Could not extract text from this file. Try saving as .txt instead.");
+        setImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+
       const parsed = parseQuestionsFromText(text);
       if (parsed.length === 0) {
-        alert("No questions found. Make sure each question is on a separate line.");
-        setImporting(false); return;
+        alert("No questions found in this file.\n\nSupported formats:\n• Word (.docx): Questions as 'Question: [text] Answer: [text]' OR one question per line\n• Text (.txt): One question per line");
+        setImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
       }
       setImportPreview(parsed);
       setShowImportPreview(true);
-    } catch (err) {
-      alert("Could not read file. Try saving as .txt format.");
+
+    } catch (err: any) {
+      console.error("File import error:", err);
+      alert("Could not read this file.\n\nError: " + (err?.message || "Unknown error") + "\n\nTip: Save your questions as a .txt file with one question per line.");
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

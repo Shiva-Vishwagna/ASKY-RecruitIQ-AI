@@ -19,18 +19,53 @@ interface Candidate {
   status?: string;
   interviewQuestions?: string[];
   screeningScore?: number;
-  screeningAnswers?: { question: string; answer: string; aiScore?: number; aiFeedback?: string; }[];
+  screeningAnswers?: { question: string; answer?: string; aiScore?: number; aiFeedback?: string; }[];
 }
 
 const STATUSES = [
-  { value: "cv_uploaded",       label: "CV Uploaded",       color: "bg-gray-100 text-gray-600"     },
-  { value: "ai_screened",       label: "AI Screened",       color: "bg-blue-100 text-blue-700"     },
+  { value: "cv_uploaded",       label: "CV Uploaded",       color: "bg-gray-100 text-gray-600" },
+  { value: "ai_screened",       label: "AI Screened",       color: "bg-blue-100 text-blue-700" },
   { value: "questions_sent",    label: "Questions Sent",    color: "bg-purple-100 text-purple-700" },
-  { value: "answers_submitted", label: "Answers Submitted", color: "bg-amber-100 text-amber-700"   },
-  { value: "hm_ready",          label: "HM Ready",          color: "bg-emerald-100 text-emerald-700"},
-  { value: "rejected",          label: "Rejected",          color: "bg-red-100 text-red-700"       },
+  { value: "answers_submitted", label: "Answers Submitted", color: "bg-amber-100 text-amber-700" },
+  { value: "hm_ready",          label: "HM Ready",          color: "bg-emerald-100 text-emerald-700" },
+  { value: "rejected",          label: "Rejected",          color: "bg-red-100 text-red-700" },
 ];
 
+// ── Suggest difficulty based on experience ────────────────────
+function suggestDifficulty(expYears?: number): "easy" | "medium" | "hard" {
+  if (!expYears || expYears <= 2) return "easy";
+  if (expYears <= 5) return "medium";
+  return "hard";
+}
+
+const difficultyConfig = {
+  easy: {
+    label: "Easy",
+    icon: "🟢",
+    color: "bg-emerald-100 text-emerald-700 border-emerald-200",
+    activeColor: "bg-emerald-600 text-white border-emerald-600",
+    desc: "Conceptual & fundamental questions",
+    prompt: "Generate 8 EASY interview questions focusing on basic concepts, definitions, and fundamental knowledge. Questions should be suitable for 0-2 years experience.",
+  },
+  medium: {
+    label: "Medium",
+    icon: "🟡",
+    color: "bg-amber-100 text-amber-700 border-amber-200",
+    activeColor: "bg-amber-500 text-white border-amber-500",
+    desc: "Scenario-based & problem solving",
+    prompt: "Generate 8 MEDIUM difficulty interview questions focusing on real-world scenarios, problem-solving, and practical experience. Questions should be suitable for 3-5 years experience.",
+  },
+  hard: {
+    label: "Hard",
+    icon: "🔴",
+    color: "bg-red-100 text-red-700 border-red-200",
+    activeColor: "bg-red-600 text-white border-red-600",
+    desc: "Architecture, design & advanced problems",
+    prompt: "Generate 8 HARD interview questions focusing on system design, architecture decisions, leadership, and advanced technical depth. Questions should be suitable for 6+ years experience.",
+  },
+};
+
+// ── Questions Tab ─────────────────────────────────────────────
 interface QuestionsTabProps {
   candidate: Candidate; questions: string[]; setQuestions: (q: string[]) => void;
   setCandidate: (c: any) => void; generatingQ: boolean; setGeneratingQ: (v: boolean) => void;
@@ -38,11 +73,13 @@ interface QuestionsTabProps {
 }
 
 function QuestionsTab({ candidate, questions, setQuestions, setCandidate, generatingQ, setGeneratingQ, API, token, id }: QuestionsTabProps) {
-  const [answers, setAnswers] = useState<string[]>([]);
+  const [answers, setAnswers]       = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ screeningScore: number; combinedScore: number; status: string } | null>(null);
-  const hasAnswers = (candidate.screeningAnswers?.length ?? 0) > 0;
+  const [result, setResult]         = useState<{ screeningScore: number; combinedScore: number; status: string } | null>(null);
+  const hasAnswers    = (candidate.screeningAnswers?.length ?? 0) > 0;
   const screeningScore = candidate.screeningScore;
+  const suggested     = suggestDifficulty(candidate.experienceYears);
+  const [difficulty, setDifficulty] = useState<"easy" | "medium" | "hard">(suggested);
 
   async function generateQuestions() {
     setGeneratingQ(true);
@@ -50,7 +87,12 @@ function QuestionsTab({ candidate, questions, setQuestions, setCandidate, genera
       const res = await fetch(`${API}/candidates/${id}/questions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ jobTitle: candidate.appliedFor || candidate.jobTitle, skills: candidate.topSkills }),
+        body: JSON.stringify({
+          jobTitle:         candidate.appliedFor || candidate.jobTitle,
+          skills:           candidate.topSkills,
+          difficulty,
+          difficultyPrompt: difficultyConfig[difficulty].prompt,
+        }),
       });
       const data = await res.json();
       const qs = data.questions || [];
@@ -93,13 +135,41 @@ function QuestionsTab({ candidate, questions, setQuestions, setCandidate, genera
         )}
       </div>
 
+      {/* ── Difficulty Selector ── */}
+      {!hasAnswers && (
+        <div className="bg-gray-50 rounded-2xl p-4 border border-gray-100">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm font-bold text-gray-700">Select Difficulty</span>
+            {candidate.experienceYears ? (
+              <span className="text-xs bg-blue-100 text-blue-600 px-2.5 py-1 rounded-full font-semibold">
+                💡 Suggested: {difficultyConfig[suggested].icon} {difficultyConfig[suggested].label} · {candidate.experienceYears}y exp
+              </span>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {(Object.entries(difficultyConfig) as [keyof typeof difficultyConfig, typeof difficultyConfig["easy"]][]).map(([key, cfg]) => (
+              <button key={key} onClick={() => setDifficulty(key)}
+                className={`p-4 rounded-xl border-2 text-left transition-all ${difficulty === key ? cfg.activeColor : cfg.color + " hover:opacity-80"}`}>
+                <div className="text-lg mb-1">{cfg.icon}</div>
+                <div className="font-bold text-sm">{cfg.label}</div>
+                <div className="text-xs mt-0.5 opacity-80">{cfg.desc}</div>
+                <div className="text-xs mt-1 opacity-70">
+                  {key === "easy" ? "0–2 yrs exp" : key === "medium" ? "3–5 yrs exp" : "6+ yrs exp"}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Result banner */}
       {result && (
         <div className={`rounded-2xl p-5 border ${result.status === "hm_ready" ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
           <div className="flex items-center gap-3">
             <span className="text-2xl">{result.status === "hm_ready" ? "🎉" : "📋"}</span>
             <div>
               <p className="font-bold text-gray-900">{result.status === "hm_ready" ? "Candidate moved to HM Ready!" : "Answers submitted for review"}</p>
-              <p className="text-sm text-gray-600">Screening Score: <strong>{result.screeningScore}/100</strong> · Combined Score: <strong>{result.combinedScore}/100</strong></p>
+              <p className="text-sm text-gray-600">Screening Score: <strong>{result.screeningScore}/100</strong> · Combined: <strong>{result.combinedScore}/100</strong></p>
             </div>
           </div>
         </div>
@@ -109,7 +179,7 @@ function QuestionsTab({ candidate, questions, setQuestions, setCandidate, genera
         <div className="bg-white rounded-2xl p-12 border border-gray-100 text-center text-gray-400">
           <div className="text-5xl mb-4">❓</div>
           <p className="font-medium">No questions yet</p>
-          <p className="text-sm mt-1">Click "Generate Questions" to create AI-powered screening questions</p>
+          <p className="text-sm mt-1">Select difficulty above then click "Generate Questions"</p>
         </div>
       ) : hasAnswers ? (
         <div className="space-y-4">
@@ -136,13 +206,19 @@ function QuestionsTab({ candidate, questions, setQuestions, setCandidate, genera
                   </span>
                 )}
               </div>
-              <p className="text-gray-600 text-sm bg-gray-50 p-3 rounded-lg mb-2">{sa.answer}</p>
               {sa.aiFeedback && <p className="text-xs text-gray-500 italic">💡 {sa.aiFeedback}</p>}
             </div>
           ))}
         </div>
       ) : (
         <div className="space-y-4">
+          <div className={`rounded-xl p-3 border flex items-center gap-3 ${difficultyConfig[difficulty].color}`}>
+            <span className="text-xl">{difficultyConfig[difficulty].icon}</span>
+            <div>
+              <span className="font-bold text-sm">{difficultyConfig[difficulty].label} Questions</span>
+              <span className="text-xs ml-2 opacity-70">— {difficultyConfig[difficulty].desc}</span>
+            </div>
+          </div>
           <div className="bg-blue-50 rounded-xl p-4 border border-blue-100 text-sm text-blue-700">
             <strong>Instructions:</strong> Answer all {questions.length} questions below, then click Submit Answers.
           </div>
@@ -170,14 +246,14 @@ function QuestionsTab({ candidate, questions, setQuestions, setCandidate, genera
 export default function CandidateDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [candidate, setCandidate] = useState<Candidate | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("profile");
+  const [candidate, setCandidate]   = useState<Candidate | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [activeTab, setActiveTab]   = useState("profile");
   const [generatingQ, setGeneratingQ] = useState(false);
-  const [questions, setQuestions] = useState<string[]>([]);
+  const [questions, setQuestions]   = useState<string[]>([]);
   const [updatingStatus, setUpdatingStatus] = useState(false);
 
-  const API = "https://asky-recruitiq-ai.onrender.com/api";
+  const API   = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
 
   useEffect(() => { fetchCandidate(); }, [id]);
@@ -222,13 +298,14 @@ export default function CandidateDetailPage() {
   if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" /></div>;
   if (!candidate) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><p className="text-gray-500">Candidate not found</p></div>;
 
-  const score = candidate.aiScore || candidate.score || 0;
-  const tierKey = candidate.tier?.replace(/-?Tier$/i, "");
+  const score    = candidate.aiScore || candidate.score || 0;
+  const tierKey  = candidate.tier?.replace(/-?Tier$/i, "");
   const tierColor = ({ A: "from-emerald-400 to-emerald-600", B: "from-blue-400 to-blue-600", C: "from-amber-400 to-amber-600" } as any)[tierKey] || "from-gray-400 to-gray-600";
   const tierBadge = ({ A: "bg-emerald-100 text-emerald-700", B: "bg-blue-100 text-blue-700", C: "bg-amber-100 text-amber-700" } as any)[tierKey] || "bg-gray-100 text-gray-600";
   const allSkills = candidate.topSkills || candidate.skills || [];
-  const jobRole = candidate.appliedFor || candidate.jobTitle || "—";
+  const jobRole   = candidate.appliedFor || candidate.jobTitle || "—";
   const currentStatus = STATUSES.find(s => s.value === (candidate.status || "cv_uploaded")) || STATUSES[0];
+  const rec = candidate.recommendation || (score >= 80 ? "Strong Hire" : score >= 60 ? "Hire" : score >= 40 ? "Maybe" : "No Hire");
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -266,7 +343,6 @@ export default function CandidateDetailPage() {
               className={`text-xs font-semibold px-3 py-1.5 rounded-lg border-0 focus:ring-2 focus:ring-blue-500 cursor-pointer ${currentStatus.color}`}>
               {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
-            {/* ── Action Buttons Row ── */}
             <div className="flex gap-2">
               <button onClick={rescreenCandidate}
                 className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-blue-700 transition-all">
@@ -284,9 +360,7 @@ export default function CandidateDetailPage() {
               <p className="font-bold text-red-700 text-sm">Primary Skill Mismatch</p>
               <p className="text-xs text-red-600">This candidate's primary skills do not match the required skill for this role.</p>
             </div>
-            <span className="ml-auto text-xs bg-red-100 text-red-700 px-2 py-1 rounded-lg font-bold shrink-0">
-              Job Fit: {candidate.jobFitScore ?? score}/100
-            </span>
+            <span className="ml-auto text-xs bg-red-100 text-red-700 px-2 py-1 rounded-lg font-bold shrink-0">Job Fit: {candidate.jobFitScore ?? score}/100</span>
           </div>
         )}
         {candidate.primarySkillMatch === true && (
@@ -311,18 +385,24 @@ export default function CandidateDetailPage() {
         </div>
       </div>
 
+      {/* Tabs */}
       <div className="bg-white border-b border-gray-100 px-6">
         <div className="flex gap-6">
-          {["profile", "ai-analysis", "questions", "recommendation"].map(tab => (
+          {["profile", "experience", "ai-analysis", "questions", "recommendation"].map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               className={`py-3 px-1 text-sm font-semibold capitalize border-b-2 transition-all whitespace-nowrap ${activeTab === tab ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"}`}>
-              {tab === "ai-analysis" ? "AI Analysis" : tab === "questions" ? `Interview Questions ${questions.length > 0 ? `(${questions.length})` : ""}` : tab}
+              {tab === "ai-analysis" ? "AI Analysis"
+               : tab === "questions" ? `Interview Questions ${questions.length > 0 ? `(${questions.length})` : ""}`
+               : tab === "experience" ? "Experience"
+               : tab}
             </button>
           ))}
         </div>
       </div>
 
       <div className="p-6 max-w-5xl">
+
+        {/* ── PROFILE TAB ── */}
         {activeTab === "profile" && (
           <div className="space-y-5">
             <div className="bg-white rounded-2xl p-6 border border-gray-100">
@@ -331,7 +411,7 @@ export default function CandidateDetailPage() {
                 <div><span className="text-gray-400 text-xs uppercase">Domain</span><p className="font-semibold text-gray-900 mt-0.5">{candidate.domain || "—"}</p></div>
                 <div><span className="text-gray-400 text-xs uppercase">Seniority</span><p className="font-semibold text-gray-900 mt-0.5">{candidate.seniority || "—"}</p></div>
                 <div><span className="text-gray-400 text-xs uppercase">Experience</span><p className="font-semibold text-gray-900 mt-0.5">{candidate.experienceYears ? `${candidate.experienceYears} years` : "—"}</p></div>
-                <div><span className="text-gray-400 text-xs uppercase">Risk Level</span><p className="font-semibold text-gray-900 mt-0.5 capitalize">{candidate.riskLevel || "medium"}</p></div>
+                <div><span className="text-gray-400 text-xs uppercase">AI Recommendation</span><p className="font-semibold text-gray-900 mt-0.5">{rec}</p></div>
                 <div><span className="text-gray-400 text-xs uppercase">Applied</span><p className="font-semibold text-gray-900 mt-0.5">{(candidate.createdAt||candidate.appliedAt) ? new Date(candidate.createdAt||candidate.appliedAt!).toLocaleDateString() : "—"}</p></div>
                 <div><span className="text-gray-400 text-xs uppercase">Status</span><p className="font-semibold text-gray-900 mt-0.5">{currentStatus.label}</p></div>
               </div>
@@ -342,29 +422,75 @@ export default function CandidateDetailPage() {
                 <p className="text-gray-600 leading-relaxed">{candidate.summary}</p>
               </div>
             )}
-            {(candidate.technicalExperience || candidate.leadershipExperience || candidate.cloudExpertise) && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white rounded-2xl p-5 border border-gray-100"><div className="text-blue-600 text-xs font-bold uppercase tracking-wider mb-2">🔧 Technical Experience</div><p className="text-gray-600 text-sm leading-relaxed">{candidate.technicalExperience || "—"}</p></div>
-                <div className="bg-white rounded-2xl p-5 border border-gray-100"><div className="text-purple-600 text-xs font-bold uppercase tracking-wider mb-2">👥 Leadership Experience</div><p className="text-gray-600 text-sm leading-relaxed">{candidate.leadershipExperience || "—"}</p></div>
-                <div className="bg-white rounded-2xl p-5 border border-gray-100"><div className="text-emerald-600 text-xs font-bold uppercase tracking-wider mb-2">☁️ Cloud Expertise</div><p className="text-gray-600 text-sm leading-relaxed">{candidate.cloudExpertise || "—"}</p></div>
-              </div>
-            )}
-            {((candidate.strengths?.length ?? 0) > 0 || (candidate.gaps?.length ?? 0) > 0) && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {(candidate.strengths?.length ?? 0) > 0 && (
-                  <div className="bg-white rounded-2xl p-5 border border-gray-100"><h3 className="font-bold text-emerald-700 mb-3">✅ Strengths</h3><ul className="space-y-1.5">{candidate.strengths!.map((s, i) => <li key={i} className="text-sm text-gray-700">• {s}</li>)}</ul></div>
-                )}
-                {(candidate.gaps?.length ?? 0) > 0 && (
-                  <div className="bg-white rounded-2xl p-5 border border-gray-100"><h3 className="font-bold text-amber-700 mb-3">⚠️ Gaps</h3><ul className="space-y-1.5">{candidate.gaps!.map((g, i) => <li key={i} className="text-sm text-gray-700">• {g}</li>)}</ul></div>
-                )}
-              </div>
-            )}
             {allSkills.length > 0 && (
               <div className="bg-white rounded-2xl p-6 border border-gray-100">
                 <h2 className="font-bold text-gray-900 mb-3">Top Skills</h2>
                 <div className="flex flex-wrap gap-2">{allSkills.map(s => <span key={s} className="bg-blue-50 text-blue-700 text-sm font-medium px-3 py-1 rounded-full border border-blue-100">{s}</span>)}</div>
               </div>
             )}
+            {((candidate.strengths?.length ?? 0) > 0 || (candidate.gaps?.length ?? 0) > 0) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {(candidate.strengths?.length ?? 0) > 0 && <div className="bg-white rounded-2xl p-5 border border-gray-100"><h3 className="font-bold text-emerald-700 mb-3">✅ Strengths</h3><ul className="space-y-1.5">{candidate.strengths!.map((s, i) => <li key={i} className="text-sm text-gray-700">• {s}</li>)}</ul></div>}
+                {(candidate.gaps?.length ?? 0) > 0 && <div className="bg-white rounded-2xl p-5 border border-gray-100"><h3 className="font-bold text-amber-700 mb-3">⚠️ Gaps</h3><ul className="space-y-1.5">{candidate.gaps!.map((g, i) => <li key={i} className="text-sm text-gray-700">• {g}</li>)}</ul></div>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── EXPERIENCE TAB ── */}
+        {activeTab === "experience" && (
+          <div className="space-y-5">
+            {/* Years at a glance */}
+            <div className="bg-white rounded-2xl p-6 border border-gray-100">
+              <h2 className="font-bold text-gray-900 mb-5">Experience Overview</h2>
+              <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className={`rounded-2xl p-5 text-center border-2 ${!candidate.experienceYears ? "bg-gray-50 border-gray-100" : candidate.experienceYears <= 2 ? "bg-emerald-50 border-emerald-200" : candidate.experienceYears <= 5 ? "bg-blue-50 border-blue-200" : "bg-purple-50 border-purple-200"}`}>
+                  <div className={`text-4xl font-black mb-1 ${!candidate.experienceYears ? "text-gray-400" : candidate.experienceYears <= 2 ? "text-emerald-600" : candidate.experienceYears <= 5 ? "text-blue-600" : "text-purple-600"}`}>
+                    {candidate.experienceYears ?? "—"}
+                  </div>
+                  <div className="text-sm font-bold text-gray-600">Years Experience</div>
+                  <div className={`text-xs mt-1 font-semibold ${candidate.experienceYears && candidate.experienceYears <= 2 ? "text-emerald-500" : candidate.experienceYears && candidate.experienceYears <= 5 ? "text-blue-500" : "text-purple-500"}`}>
+                    {!candidate.experienceYears ? "—" : candidate.experienceYears <= 2 ? "Junior Level" : candidate.experienceYears <= 5 ? "Mid Level" : "Senior Level"}
+                  </div>
+                </div>
+                <div className="bg-gray-50 rounded-2xl p-5 text-center border border-gray-100">
+                  <div className="text-2xl font-black text-gray-900 mb-1">{candidate.seniority || "—"}</div>
+                  <div className="text-sm font-bold text-gray-600">Seniority Level</div>
+                  <div className="text-xs text-gray-400 mt-1">As assessed by AI</div>
+                </div>
+                <div className="bg-gray-50 rounded-2xl p-5 text-center border border-gray-100">
+                  <div className="text-2xl font-black text-gray-900 mb-1">{candidate.domain || "—"}</div>
+                  <div className="text-sm font-bold text-gray-600">Primary Domain</div>
+                  <div className="text-xs text-gray-400 mt-1">Core expertise area</div>
+                </div>
+              </div>
+
+              {/* Suggested question difficulty */}
+              {candidate.experienceYears && (
+                <div className={`rounded-xl p-4 border flex items-center gap-3 ${difficultyConfig[suggestDifficulty(candidate.experienceYears)].color}`}>
+                  <span className="text-2xl">{difficultyConfig[suggestDifficulty(candidate.experienceYears)].icon}</span>
+                  <div>
+                    <p className="font-bold text-sm">Suggested Interview Difficulty: {difficultyConfig[suggestDifficulty(candidate.experienceYears)].label}</p>
+                    <p className="text-xs opacity-80 mt-0.5">{difficultyConfig[suggestDifficulty(candidate.experienceYears)].desc}</p>
+                  </div>
+                  <button onClick={() => setActiveTab("questions")}
+                    className="ml-auto text-xs font-bold underline opacity-80 hover:opacity-100 shrink-0">
+                    Go to Questions →
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Technical / Leadership / Cloud */}
+            {(candidate.technicalExperience || candidate.leadershipExperience || candidate.cloudExpertise) && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {candidate.technicalExperience && <div className="bg-white rounded-2xl p-5 border border-gray-100"><div className="text-blue-600 text-xs font-bold uppercase tracking-wider mb-2">🔧 Technical</div><p className="text-gray-600 text-sm leading-relaxed">{candidate.technicalExperience}</p></div>}
+                {candidate.leadershipExperience && <div className="bg-white rounded-2xl p-5 border border-gray-100"><div className="text-purple-600 text-xs font-bold uppercase tracking-wider mb-2">👥 Leadership</div><p className="text-gray-600 text-sm leading-relaxed">{candidate.leadershipExperience}</p></div>}
+                {candidate.cloudExpertise && <div className="bg-white rounded-2xl p-5 border border-gray-100"><div className="text-emerald-600 text-xs font-bold uppercase tracking-wider mb-2">☁️ Cloud</div><p className="text-gray-600 text-sm leading-relaxed">{candidate.cloudExpertise}</p></div>}
+              </div>
+            )}
+
+            {/* Tech Stack */}
             {((candidate.databases?.length ?? 0) > 0 || (candidate.frameworks?.length ?? 0) > 0 || (candidate.tools?.length ?? 0) > 0) && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {(candidate.databases?.length ?? 0) > 0 && <div className="bg-white rounded-2xl p-5 border border-gray-100"><h3 className="font-bold text-gray-700 text-sm mb-3">🗄️ Databases</h3><div className="flex flex-wrap gap-2">{candidate.databases!.map(d => <span key={d} className="bg-orange-50 text-orange-700 text-xs font-medium px-2.5 py-1 rounded-full border border-orange-100">{d}</span>)}</div></div>}
@@ -375,6 +501,7 @@ export default function CandidateDetailPage() {
           </div>
         )}
 
+        {/* ── AI ANALYSIS TAB ── */}
         {activeTab === "ai-analysis" && (
           <div className="space-y-5">
             <div className="bg-white rounded-2xl p-6 border border-gray-100">
@@ -409,18 +536,20 @@ export default function CandidateDetailPage() {
           </div>
         )}
 
+        {/* ── QUESTIONS TAB ── */}
         {activeTab === "questions" && (
           <QuestionsTab candidate={candidate} questions={questions} setQuestions={setQuestions}
             setCandidate={setCandidate} generatingQ={generatingQ} setGeneratingQ={setGeneratingQ}
             API={API} token={token || ""} id={id || ""} />
         )}
 
+        {/* ── RECOMMENDATION TAB ── */}
         {activeTab === "recommendation" && (
           <div className="space-y-5">
             <div className="bg-white rounded-2xl p-6 border border-gray-100">
               <h2 className="font-bold text-gray-900 mb-4">AI Hiring Recommendation</h2>
-              <div className={`inline-block px-5 py-2 rounded-full text-sm font-bold mb-4 ${candidate.recommendation === "Strong Hire" ? "bg-emerald-100 text-emerald-700" : candidate.recommendation === "Hire" ? "bg-blue-100 text-blue-700" : candidate.recommendation === "Maybe" ? "bg-amber-100 text-amber-700" : candidate.recommendation ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"}`}>
-                {candidate.recommendation || (score >= 80 ? "Strong Hire" : score >= 60 ? "Hire" : score >= 40 ? "Maybe" : "No Hire")}
+              <div className={`inline-block px-5 py-2 rounded-full text-sm font-bold mb-4 ${rec === "Strong Hire" ? "bg-emerald-100 text-emerald-700" : rec === "Hire" ? "bg-blue-100 text-blue-700" : rec === "Maybe" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"}`}>
+                {rec}
               </div>
               <p className="text-gray-600 leading-relaxed">{candidate.recommendationReason || (score >= 80 ? "Strong candidate — recommend moving forward to interview." : score >= 60 ? "Good candidate — consider for interview." : "Below average match — review manually before proceeding.")}</p>
             </div>

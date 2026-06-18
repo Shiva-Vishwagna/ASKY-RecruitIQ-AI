@@ -68,6 +68,28 @@ router.get('/:id/candidates', protect, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+// GET /api/jobs/:id/question-bank — fetch current question bank
+router.get('/:id/question-bank', protect, async (req, res) => {
+  try {
+    const job = await Job.findById(req.params.id).select('questionBank title');
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    res.json({ questions: job.questionBank || [], count: (job.questionBank || []).length });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// DELETE /api/jobs/:id/question-bank — clear all questions from bank
+router.delete('/:id/question-bank', protect, async (req, res) => {
+  try {
+    const job = await Job.findByIdAndUpdate(
+      req.params.id,
+      { questionBank: [], updatedAt: new Date() },
+      { new: true }
+    );
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    res.json({ message: 'Question bank cleared', count: 0 });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
 // POST /api/jobs/:id/question-bank — save question bank for a job
 router.post('/:id/question-bank', protect, async (req, res) => {
   try {

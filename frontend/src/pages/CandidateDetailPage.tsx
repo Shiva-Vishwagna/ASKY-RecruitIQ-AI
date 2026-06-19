@@ -78,11 +78,12 @@ function Bar({ label, score, color="bg-blue-500", weight="" }: { label:string; s
 }
 
 // ── Helper: Score chip ────────────────────────────────────────
-function ScoreChip({ score, label }: { score:number; label:string }) {
-  const c = score>=80?"bg-emerald-100 text-emerald-700":score>=60?"bg-blue-100 text-blue-700":score>=40?"bg-amber-100 text-amber-700":"bg-red-100 text-red-700";
+function ScoreChip({ score, label }: { score:number|null; label:string }) {
+  const n = score ?? 0;
+  const c = n>=80?"bg-emerald-100 text-emerald-700":n>=60?"bg-blue-100 text-blue-700":n>=40?"bg-amber-100 text-amber-700":"bg-red-100 text-red-700";
   return (
     <div className="text-center">
-      <div className={`text-3xl font-black ${c.split(' ')[1]}`}>{score}</div>
+      <div className={`text-3xl font-black ${c.split(' ')[1]}`}>{score ?? "—"}</div>
       <div className="text-xs text-gray-400 mt-0.5">{label}</div>
     </div>
   );
@@ -453,14 +454,19 @@ export default function CandidateDetailPage() {
   if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"/></div>;
   if (!candidate) return <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-500">Candidate not found</div>;
 
-  const cvScore     = candidate.aiScore || candidate.score || 0;
-  const screenScore = candidate.screeningScore || 0;
-  const combined    = candidate.combinedScore || cvScore;
-  const tierKey     = (candidate.tier||"C-Tier").replace(/-?Tier$/i,"");
-  const tierColor   = ({A:"from-emerald-400 to-emerald-600",B:"from-blue-400 to-blue-600",C:"from-amber-400 to-amber-600"} as any)[tierKey]||"from-gray-400 to-gray-600";
-  const rec         = candidate.recommendation || (cvScore>=80?"Strong Hire":cvScore>=70?"Hire":cvScore>=55?"Consider":cvScore>=40?"Weak Fit":"Reject");
-  const curStage    = STAGES.find(s=>s.value===(candidate.status||"cv_uploaded"))||STAGES[0];
-  const hasScreening = screenScore > 0;
+  const cvScore      = candidate.aiScore || candidate.score || 0;
+  // screeningScore is 0 until candidate actually completes screening — show as null until then
+  const rawScreen    = candidate.screeningScore;
+  const screenScore  = (rawScreen && rawScreen > 0) ? rawScreen : null;
+  // combinedScore: use stored value if screening done, else just cv score
+  const combined     = (candidate.combinedScore && candidate.combinedScore > 0 && screenScore)
+    ? candidate.combinedScore
+    : cvScore;
+  const tierKey      = (candidate.tier||"C-Tier").replace(/-?Tier$/i,"");
+  const tierColor    = ({A:"from-emerald-400 to-emerald-600",B:"from-blue-400 to-blue-600",C:"from-amber-400 to-amber-600"} as any)[tierKey]||"from-gray-400 to-gray-600";
+  const rec          = candidate.recommendation || (cvScore>=85?"Strong Hire":cvScore>=72?"Hire":cvScore>=58?"Consider":cvScore>=42?"Weak Fit":"Reject");
+  const curStage     = STAGES.find(s=>s.value===(candidate.status||"cv_uploaded"))||STAGES[0];
+  const hasScreening = screenScore !== null && screenScore > 0;
   const hasSessions  = (candidate.screeningSessions||[]).length > 0;
   const aiSessions   = (candidate.screeningSessions||[]).filter(s=>s.sessionType==="ai_generated");
   const bankSessions = (candidate.screeningSessions||[]).filter(s=>s.sessionType==="bank_questions");
@@ -487,15 +493,22 @@ export default function CandidateDetailPage() {
           {/* Score display */}
           <div className="flex items-center gap-4 shrink-0">
             <ScoreChip score={cvScore} label="CV Score"/>
-            {hasScreening && <>
-              <span className="text-gray-300 text-lg">+</span>
-              <ScoreChip score={screenScore} label="Screening"/>
-              <span className="text-gray-300 text-lg">=</span>
-              <div className="text-center bg-slate-800 rounded-xl px-4 py-2">
-                <div className="text-3xl font-black text-white">{combined}</div>
-                <div className="text-xs text-gray-400">Combined</div>
+            {hasScreening && screenScore !== null ? (
+              <>
+                <span className="text-gray-300 text-lg">+</span>
+                <ScoreChip score={screenScore} label="Screening"/>
+                <span className="text-gray-300 text-lg">=</span>
+                <div className="text-center bg-slate-800 rounded-xl px-4 py-2">
+                  <div className="text-3xl font-black text-white">{combined}</div>
+                  <div className="text-xs text-gray-400">Combined</div>
+                </div>
+              </>
+            ) : (
+              <div className="text-center bg-amber-50 border border-amber-200 rounded-xl px-4 py-2">
+                <div className="text-xs font-semibold text-amber-600">Screening pending</div>
+                <div className="text-xs text-amber-400 mt-0.5">Generate questions →</div>
               </div>
-            </>}
+            )}
           </div>
           {/* Actions */}
           <div className="flex flex-col gap-2 items-end shrink-0">
@@ -563,24 +576,43 @@ export default function CandidateDetailPage() {
             <div className="bg-white rounded-2xl p-6 border border-gray-100">
               <h2 className="font-bold text-gray-900 mb-5">Candidate Fit Score</h2>
               <div className="grid grid-cols-3 gap-4 mb-5">
+                {/* CV Score — always shown */}
                 <div className="text-center bg-blue-50 rounded-2xl p-5 border border-blue-100">
                   <div className="text-4xl font-black text-blue-600">{cvScore}</div>
                   <div className="text-sm font-bold text-blue-700 mt-1">CV / Resume</div>
                   <div className="text-xs text-blue-400 mt-0.5">Skills 70% + Stability 30%</div>
                 </div>
-                <div className={`text-center rounded-2xl p-5 border ${hasScreening?"bg-purple-50 border-purple-100":"bg-gray-50 border-gray-100"}`}>
-                  <div className={`text-4xl font-black ${hasScreening?"text-purple-600":"text-gray-300"}`}>{hasScreening?screenScore:"—"}</div>
-                  <div className={`text-sm font-bold mt-1 ${hasScreening?"text-purple-700":"text-gray-400"}`}>Technical Screening</div>
-                  <div className="text-xs text-gray-400 mt-0.5">{hasScreening?"Accuracy 40% + Depth 40% + Fit 20%":"Complete screening to score"}</div>
+                {/* Screening Score — show pending state if not done */}
+                <div className={`text-center rounded-2xl p-5 border ${hasScreening?"bg-purple-50 border-purple-100":"bg-amber-50 border-amber-200"}`}>
+                  {hasScreening ? (
+                    <>
+                      <div className="text-4xl font-black text-purple-600">{screenScore}</div>
+                      <div className="text-sm font-bold text-purple-700 mt-1">Technical Screening</div>
+                      <div className="text-xs text-purple-400 mt-0.5">Accuracy 40% + Depth 40% + Fit 20%</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-3xl text-amber-300 mt-1">⏳</div>
+                      <div className="text-sm font-bold text-amber-600 mt-1">Screening Pending</div>
+                      <div className="text-xs text-amber-400 mt-0.5">Go to "Generate Questions" tab</div>
+                    </>
+                  )}
                 </div>
-                <div className="text-center bg-slate-800 rounded-2xl p-5">
-                  <div className="text-4xl font-black text-white">{combined}</div>
-                  <div className="text-sm font-bold text-gray-300 mt-1">Overall Score</div>
-                  <div className="text-xs text-gray-500 mt-0.5">{hasScreening?"CV 60% + Screen 40%":"CV score (screening pending)"}</div>
+                {/* Combined / Final Score */}
+                <div className={`text-center rounded-2xl p-5 ${hasScreening?"bg-slate-800":"bg-slate-100 border border-slate-200"}`}>
+                  <div className={`text-4xl font-black ${hasScreening?"text-white":"text-slate-400"}`}>{combined}</div>
+                  <div className={`text-sm font-bold mt-1 ${hasScreening?"text-gray-300":"text-slate-500"}`}>
+                    {hasScreening?"Final Score":"CV Score Only"}
+                  </div>
+                  <div className={`text-xs mt-0.5 ${hasScreening?"text-gray-500":"text-slate-400"}`}>
+                    {hasScreening?"CV 60% + Screen 40%":"Score updates after screening"}
+                  </div>
                 </div>
               </div>
               <div className={`rounded-xl p-4 border text-center ${REC_STYLE[rec]||"bg-gray-50 border-gray-100"}`}>
-                <div className="text-xs font-bold uppercase tracking-wide opacity-60 mb-1">Fit Recommendation</div>
+                <div className="text-xs font-bold uppercase tracking-wide opacity-60 mb-1">
+                  {hasScreening ? "Fit Recommendation (CV + Screening)" : "Fit Recommendation (CV Only — screening pending)"}
+                </div>
                 <div className="text-xl font-black">{rec}</div>
               </div>
             </div>
@@ -633,25 +665,33 @@ export default function CandidateDetailPage() {
                       <td className="px-5 py-3"><div className="w-24 h-2 bg-gray-100 rounded-full"><div className={`h-2 rounded-full ${r.color}`} style={{width:`${r.score}%`}}/></div></td>
                     </tr>
                   ))}
-                  {hasScreening && <>
-                    <tr className="bg-purple-50"><td className="px-5 py-3 font-bold text-purple-700 text-sm" colSpan={4}>🎙️ Technical Screening ({screenScore}/100)</td></tr>
-                    {[
-                      {label:"Technical Accuracy",score:candidate.screeningBreakdown?.technical||0,weight:"40%",color:"bg-purple-500"},
-                      {label:"Technical Depth",   score:candidate.screeningBreakdown?.depth||0,    weight:"40%",color:"bg-violet-500"},
-                      {label:"Role Relevance",    score:candidate.screeningBreakdown?.relevance||0,weight:"20%",color:"bg-fuchsia-500"},
-                    ].map(r=>(
-                      <tr key={r.label} className="hover:bg-gray-50">
-                        <td className="px-5 py-3 text-sm text-gray-700 pl-9">{r.label}</td>
-                        <td className="px-5 py-3 text-center font-bold text-gray-900">{r.score}</td>
-                        <td className="px-5 py-3 text-center text-xs text-gray-400">{r.weight}</td>
-                        <td className="px-5 py-3"><div className="w-24 h-2 bg-gray-100 rounded-full"><div className={`h-2 rounded-full ${r.color}`} style={{width:`${r.score}%`}}/></div></td>
-                      </tr>
-                    ))}
-                  </>}
+                  {hasScreening && screenScore !== null ? (
+                    <>
+                      <tr className="bg-purple-50"><td className="px-5 py-3 font-bold text-purple-700 text-sm" colSpan={4}>🎙️ Technical Screening ({screenScore}/100)</td></tr>
+                      {[
+                        {label:"Technical Accuracy",score:candidate.screeningBreakdown?.technical||0,weight:"40%",color:"bg-purple-500"},
+                        {label:"Technical Depth",   score:candidate.screeningBreakdown?.depth||0,    weight:"40%",color:"bg-violet-500"},
+                        {label:"Role Relevance",    score:candidate.screeningBreakdown?.relevance||0,weight:"20%",color:"bg-fuchsia-500"},
+                      ].map(r=>(
+                        <tr key={r.label} className="hover:bg-gray-50">
+                          <td className="px-5 py-3 text-sm text-gray-700 pl-9">{r.label}</td>
+                          <td className="px-5 py-3 text-center font-bold text-gray-900">{r.score}</td>
+                          <td className="px-5 py-3 text-center text-xs text-gray-400">{r.weight}</td>
+                          <td className="px-5 py-3"><div className="w-24 h-2 bg-gray-100 rounded-full"><div className={`h-2 rounded-full ${r.color}`} style={{width:`${r.score}%`}}/></div></td>
+                        </tr>
+                      ))}
+                    </>
+                  ) : (
+                    <tr className="bg-amber-50">
+                      <td className="px-5 py-4 text-sm text-amber-700 font-semibold pl-5" colSpan={4}>
+                        ⏳ Technical Screening not completed — go to "Generate Questions" tab to screen this candidate
+                      </td>
+                    </tr>
+                  )}
                   <tr className="bg-slate-800">
-                    <td className="px-5 py-4 font-black text-white">🏆 Overall Candidate Score</td>
+                    <td className="px-5 py-4 font-black text-white">🏆 {hasScreening ? "Final Combined Score" : "CV Score (Screening Pending)"}</td>
                     <td className="px-5 py-4 text-center text-2xl font-black text-white">{combined}</td>
-                    <td className="px-5 py-4 text-center text-xs text-gray-400">{hasScreening?"60%+40%":"CV Only"}</td>
+                    <td className="px-5 py-4 text-center text-xs text-gray-400">{hasScreening?"CV 60% + Screen 40%":"CV Only"}</td>
                     <td className="px-5 py-4"><span className={`text-xs font-bold px-3 py-1 rounded-full border ${REC_STYLE[rec]||""}`}>{rec}</span></td>
                   </tr>
                 </tbody>
@@ -874,90 +914,125 @@ export default function CandidateDetailPage() {
           <div className="space-y-5">
             <div className="bg-white rounded-2xl border border-gray-100 p-6">
               <h2 className="font-bold text-gray-900 text-lg mb-2">📋 Select Report to Share with HM</h2>
-              <p className="text-sm text-gray-500 mb-6">Choose what evidence to include in the Hiring Manager report. The score will be calculated based on your selection.</p>
+              <p className="text-sm text-gray-500 mb-5">Select which score to share with the Hiring Manager. Option 1 is always available. Options 2 & 3 unlock after screening.</p>
 
-              {/* 3 options */}
+              {/* Option cards */}
               <div className="space-y-3 mb-6">
-                {/* Option 1: CV Only */}
+
+                {/* ── Option 1: AI CV Screening Score Only ── */}
                 <button onClick={()=>setHmMode("cv_only")}
-                  className={`w-full p-5 rounded-xl border-2 text-left transition-all ${hmMode==="cv_only"?"border-blue-500 bg-blue-50":"border-gray-200 hover:border-gray-300"}`}>
+                  className={`w-full p-5 rounded-xl border-2 text-left transition-all ${hmMode==="cv_only"?"border-blue-500 bg-blue-50 shadow-sm":"border-gray-200 hover:border-blue-300"}`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <span className="text-2xl">📄</span>
                       <div>
-                        <div className="font-bold text-gray-900">CV / Resume Score Only</div>
-                        <div className="text-sm text-gray-500 mt-0.5">Share based on AI analysis of resume alone</div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-gray-900">AI CV Screening Score</span>
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">Always available</span>
+                        </div>
+                        <div className="text-sm text-gray-500 mt-0.5">Based on AI analysis of resume — skills depth and stability</div>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className={`text-2xl font-black ${cvScore>=80?"text-emerald-600":cvScore>=60?"text-blue-600":"text-amber-600"}`}>{cvScore}</div>
-                      <div className="text-xs text-gray-400">Score</div>
+                    <div className="text-right shrink-0 ml-4">
+                      <div className={`text-3xl font-black ${cvScore>=80?"text-emerald-600":cvScore>=60?"text-blue-600":cvScore>=40?"text-amber-600":"text-red-600"}`}>{cvScore}</div>
+                      <div className="text-xs text-gray-400">/ 100</div>
                     </div>
                   </div>
-                  <div className="mt-3 text-xs text-gray-400 flex items-center gap-2">
-                    <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">Skills {candidate.cvScoreBreakdown?.skillsMatchScore||0}</span>
-                    <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded font-medium">Stability {candidate.cvScoreBreakdown?.stabilityScore||0}</span>
+                  <div className="mt-3 flex items-center gap-2 flex-wrap">
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full font-medium">Skills Match: {candidate.cvScoreBreakdown?.skillsMatchScore||0} × 70%</span>
+                    <span className="text-xs text-gray-300">+</span>
+                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full font-medium">Stability: {candidate.cvScoreBreakdown?.stabilityScore||0} × 30%</span>
                   </div>
                 </button>
 
-                {/* Option 2: CV + AI Questions */}
-                <button onClick={()=>setHmMode("cv_ai_questions")} disabled={aiSessions.length===0}
-                  className={`w-full p-5 rounded-xl border-2 text-left transition-all ${aiSessions.length===0?"opacity-40 cursor-not-allowed border-gray-100":hmMode==="cv_ai_questions"?"border-blue-500 bg-blue-50":"border-gray-200 hover:border-gray-300"}`}>
+                {/* ── Option 2: AI CV + AI Questions ── */}
+                <button onClick={()=>{ if(aiSessions.length>0) setHmMode("cv_ai_questions"); }}
+                  className={`w-full p-5 rounded-xl border-2 text-left transition-all ${
+                    aiSessions.length===0
+                      ? "border-gray-100 bg-gray-50 cursor-not-allowed"
+                      : hmMode==="cv_ai_questions"
+                        ? "border-purple-500 bg-purple-50 shadow-sm"
+                        : "border-gray-200 hover:border-purple-300"
+                  }`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <span className="text-2xl">🤖</span>
+                      <span className={`text-2xl ${aiSessions.length===0?"grayscale opacity-40":""}`}>🤖</span>
                       <div>
-                        <div className="font-bold text-gray-900">CV + AI Generated Questions</div>
-                        <div className="text-sm text-gray-500 mt-0.5">
-                          {aiSessions.length>0 ? `${aiSessions.length} session(s) available · Latest: ${aiSessions[aiSessions.length-1]?.screeningScore||0}/100` : "No AI screening sessions yet — go to Generate Questions"}
+                        <div className="flex items-center gap-2">
+                          <span className={`font-bold ${aiSessions.length===0?"text-gray-400":"text-gray-900"}`}>AI CV Score + AI Questions Score</span>
+                          {aiSessions.length===0
+                            ? <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">Complete screening first</span>
+                            : <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-semibold">{aiSessions.length} session{aiSessions.length>1?"s":""}</span>
+                          }
+                        </div>
+                        <div className={`text-sm mt-0.5 ${aiSessions.length===0?"text-gray-400":"text-gray-500"}`}>
+                          {aiSessions.length===0
+                            ? "Go to Generate Questions → AI Generated → complete screening"
+                            : `Latest AI screening: ${aiSessions[aiSessions.length-1]?.screeningScore||0}/100 on ${aiSessions[aiSessions.length-1]?.conductedAt ? new Date(aiSessions[aiSessions.length-1].conductedAt!).toLocaleDateString() : "—"}`
+                          }
                         </div>
                       </div>
                     </div>
                     {aiSessions.length>0 && (
-                      <div className="text-right">
-                        <div className="text-2xl font-black text-purple-600">
+                      <div className="text-right shrink-0 ml-4">
+                        <div className="text-3xl font-black text-purple-600">
                           {Math.round((cvScore*0.6)+(aiSessions[aiSessions.length-1].screeningScore*0.4))}
                         </div>
-                        <div className="text-xs text-gray-400">Combined</div>
+                        <div className="text-xs text-gray-400">/ 100</div>
                       </div>
                     )}
                   </div>
                   {aiSessions.length>0 && (
-                    <div className="mt-3 text-xs text-gray-400 flex items-center gap-2">
-                      <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">CV {cvScore} × 60%</span>
-                      <span>+</span>
-                      <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-medium">Screen {aiSessions[aiSessions.length-1]?.screeningScore||0} × 40%</span>
+                    <div className="mt-3 flex items-center gap-2 flex-wrap">
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full font-medium">CV: {cvScore} × 60%</span>
+                      <span className="text-xs text-gray-300">+</span>
+                      <span className="text-xs bg-purple-100 text-purple-700 px-2.5 py-1 rounded-full font-medium">AI Screen: {aiSessions[aiSessions.length-1]?.screeningScore||0} × 40%</span>
                     </div>
                   )}
                 </button>
 
-                {/* Option 3: CV + Bank Questions */}
-                <button onClick={()=>setHmMode("cv_bank_questions")} disabled={bankSessions.length===0}
-                  className={`w-full p-5 rounded-xl border-2 text-left transition-all ${bankSessions.length===0?"opacity-40 cursor-not-allowed border-gray-100":hmMode==="cv_bank_questions"?"border-purple-500 bg-purple-50":"border-gray-200 hover:border-gray-300"}`}>
+                {/* ── Option 3: AI CV + Question Bank ── */}
+                <button onClick={()=>{ if(bankSessions.length>0) setHmMode("cv_bank_questions"); }}
+                  className={`w-full p-5 rounded-xl border-2 text-left transition-all ${
+                    bankSessions.length===0
+                      ? "border-gray-100 bg-gray-50 cursor-not-allowed"
+                      : hmMode==="cv_bank_questions"
+                        ? "border-emerald-500 bg-emerald-50 shadow-sm"
+                        : "border-gray-200 hover:border-emerald-300"
+                  }`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <span className="text-2xl">📋</span>
+                      <span className={`text-2xl ${bankSessions.length===0?"grayscale opacity-40":""}`}>📋</span>
                       <div>
-                        <div className="font-bold text-gray-900">CV + Job Bank Questions</div>
-                        <div className="text-sm text-gray-500 mt-0.5">
-                          {bankSessions.length>0 ? `${bankSessions.length} session(s) available · Latest: ${bankSessions[bankSessions.length-1]?.screeningScore||0}/100` : "No bank screening sessions yet — go to Generate Questions"}
+                        <div className="flex items-center gap-2">
+                          <span className={`font-bold ${bankSessions.length===0?"text-gray-400":"text-gray-900"}`}>AI CV Score + Question Bank Score</span>
+                          {bankSessions.length===0
+                            ? <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">Complete screening first</span>
+                            : <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">{bankSessions.length} session{bankSessions.length>1?"s":""}</span>
+                          }
+                        </div>
+                        <div className={`text-sm mt-0.5 ${bankSessions.length===0?"text-gray-400":"text-gray-500"}`}>
+                          {bankSessions.length===0
+                            ? "Go to Generate Questions → From Job Bank → complete screening"
+                            : `Latest bank screening: ${bankSessions[bankSessions.length-1]?.screeningScore||0}/100 on ${bankSessions[bankSessions.length-1]?.conductedAt ? new Date(bankSessions[bankSessions.length-1].conductedAt!).toLocaleDateString() : "—"}`
+                          }
                         </div>
                       </div>
                     </div>
                     {bankSessions.length>0 && (
-                      <div className="text-right">
-                        <div className="text-2xl font-black text-purple-600">
+                      <div className="text-right shrink-0 ml-4">
+                        <div className="text-3xl font-black text-emerald-600">
                           {Math.round((cvScore*0.6)+(bankSessions[bankSessions.length-1].screeningScore*0.4))}
                         </div>
-                        <div className="text-xs text-gray-400">Combined</div>
+                        <div className="text-xs text-gray-400">/ 100</div>
                       </div>
                     )}
                   </div>
                   {bankSessions.length>0 && (
-                    <div className="mt-3 text-xs text-gray-400 flex items-center gap-2">
-                      <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">CV {cvScore} × 60%</span>
-                      <span>+</span>
-                      <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-medium">Screen {bankSessions[bankSessions.length-1]?.screeningScore||0} × 40%</span>
+                    <div className="mt-3 flex items-center gap-2 flex-wrap">
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full font-medium">CV: {cvScore} × 60%</span>
+                      <span className="text-xs text-gray-300">+</span>
+                      <span className="text-xs bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full font-medium">Bank Screen: {bankSessions[bankSessions.length-1]?.screeningScore||0} × 40%</span>
                     </div>
                   )}
                 </button>

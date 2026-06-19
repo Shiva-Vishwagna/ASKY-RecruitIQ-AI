@@ -6,6 +6,7 @@ interface Job {
   _id: string; title: string; department: string; location: string;
   status: string; description: string; requirements: string[];
   level?: string; requiredSkills?: string[]; minAiScore?: number; createdAt: string;
+  roleType?: "technical"|"non_technical";
   questionBank?: { text: string; difficulty: "easy"|"medium"|"hard"; category: string }[];
 }
 interface Candidate {
@@ -330,6 +331,9 @@ export default function JobDetailPage() {
               <span>📍 {job.location||"Remote"}</span>
               {job.level && <span>🎯 {job.level}</span>}
               {job.minAiScore && <span>⭐ Min Score: {job.minAiScore}</span>}
+              <span className={`font-semibold px-2 py-0.5 rounded-full text-xs ${job.roleType==="non_technical"?"bg-amber-100 text-amber-700":"bg-blue-100 text-blue-700"}`}>
+                {job.roleType==="non_technical" ? "🤝 Non-Technical" : "💻 Technical"}
+              </span>
             </div>
             {(job.requiredSkills?.length??0) > 0 && (
               <div className="flex gap-1.5 mt-2 flex-wrap">

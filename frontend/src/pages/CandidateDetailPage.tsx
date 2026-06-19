@@ -62,7 +62,7 @@ const DIFF_CFG = {
 const API = "https://asky-recruitiq-ai.onrender.com/api";
 
 // ── Helper: Score bar ─────────────────────────────────────────
-function Bar({ label, score, color="bg-blue-500", weight="" }: { label:string; score:number; color?:string; weight?:string }) {
+function Bar({ label, score, color="bg-blue-500", weight="" }: { label:string; score:number; color?:string; weight?:string; key?:any }) {
   return (
     <div>
       <div className="flex justify-between text-xs mb-1">
@@ -227,207 +227,227 @@ export default function CandidateDetailPage() {
     const screenScore = c.screeningScore || 0;
     const finalScore  = c.combinedScore || cvScore;
     const rec         = c.recommendation || "Pending";
-    const recStyle    = REC_STYLE[rec] || "bg-gray-100 text-gray-600 border-gray-200";
-    const recColor    = rec==="Strong Hire"?"#065f46":rec==="Hire"?"#1e40af":rec==="Consider"?"#92400e":rec==="Weak Fit"?"#9a3412":"#7f1d1d";
-    const reportLabel = c.hmReportType==="cv_only"?"CV Score Only":c.hmReportType==="cv_ai_questions"?"CV + AI Screening":"CV + Bank Questions";
-    const date        = new Date().toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
-    const tierKey     = (c.tier||"C-Tier").replace(/-?Tier$/i,"");
-    const sc          = (n:number) => n>=80?"#065f46":n>=60?"#1e40af":n>=40?"#92400e":"#7f1d1d";
-    const bar         = (n:number,color:string) => `<div style="height:8px;background:#e5e7eb;border-radius:4px"><div style="height:8px;width:${n}%;background:${color};border-radius:4px"></div></div>`;
+    const date        = new Date().toLocaleDateString("en-IN", {day:"2-digit",month:"short",year:"numeric"});
+    const tierKey     = (c.tier || "C-Tier").replace(/-?Tier$/i, "");
+    const reportLabel = c.hmReportType === "cv_only" ? "CV Score Only" : c.hmReportType === "cv_ai_questions" ? "CV + AI Screening" : "CV + Bank Questions";
 
-    const sessions    = c.screeningSessions || [];
-    const aiSessions  = sessions.filter(s=>s.sessionType==="ai_generated");
-    const bankSessions= sessions.filter(s=>s.sessionType==="bank_questions");
+    function sc(n: number): string {
+      return n >= 80 ? "#065f46" : n >= 60 ? "#1e40af" : n >= 40 ? "#92400e" : "#7f1d1d";
+    }
+    function bg(n: number): string {
+      return n >= 80 ? "#d1fae5" : n >= 60 ? "#dbeafe" : n >= 40 ? "#fef3c7" : "#fee2e2";
+    }
+    function bar(n: number, color: string): string {
+      return '<div style="height:8px;background:#e5e7eb;border-radius:4px"><div style="height:8px;width:' + n + '%;background:' + color + ';border-radius:4px"></div></div>';
+    }
+    function scoreRow(label: string, score: number, weight: string): string {
+      return '<tr style="border-bottom:1px solid #f9fafb">'
+        + '<td style="padding:9px 14px;font-size:12px;color:#374151;padding-left:24px">' + label + '</td>'
+        + '<td style="padding:9px 14px;text-align:center;font-weight:700;font-size:14px;color:' + sc(score) + '">' + score + '</td>'
+        + '<td style="padding:9px 14px;text-align:center;font-size:11px;color:#9ca3af">' + weight + '</td>'
+        + '<td style="padding:9px 14px;width:130px">' + bar(score, sc(score)) + '</td>'
+        + '</tr>';
+    }
+
+    const recColor = rec === "Strong Hire" ? "#065f46" : rec === "Hire" ? "#1e40af" : rec === "Consider" ? "#92400e" : rec === "Weak Fit" ? "#9a3412" : "#7f1d1d";
+    const recBg    = rec === "Strong Hire" ? "#d1fae5" : rec === "Hire" ? "#dbeafe" : rec === "Consider" ? "#fef3c7" : rec === "Weak Fit" ? "#ffedd5" : "#fee2e2";
+    const tierColor = tierKey === "A" ? "#065f46" : tierKey === "B" ? "#1e40af" : "#92400e";
+    const tierBg    = tierKey === "A" ? "#d1fae5" : tierKey === "B" ? "#dbeafe" : "#fef3c7";
 
     const riskItems: string[] = [];
-    if (c.riskFlags?.frequentJobChanges)                           riskItems.push("🔄 Frequent job changes");
-    if (c.riskFlags?.domainMismatch)                               riskItems.push("🎯 Domain mismatch");
-    if ((c.riskFlags?.missingMandatorySkills||[]).length>0)        riskItems.push(`❌ Missing: ${c.riskFlags!.missingMandatorySkills!.join(", ")}`);
-    if (c.riskFlags?.noticePeriodRisk && c.riskFlags.noticePeriodRisk!=="Not mentioned" && c.riskFlags.noticePeriodRisk!=="")
-      riskItems.push(`⏰ ${c.riskFlags.noticePeriodRisk}`);
+    if (c.riskFlags?.frequentJobChanges) riskItems.push("🔄 Frequent job changes");
+    if (c.riskFlags?.domainMismatch)     riskItems.push("🎯 Domain mismatch");
+    const missingSkills = c.riskFlags?.missingMandatorySkills || [];
+    if (missingSkills.length > 0) riskItems.push("❌ Missing: " + missingSkills.join(", "));
+    if (c.riskFlags?.noticePeriodRisk && c.riskFlags.noticePeriodRisk !== "Not mentioned" && c.riskFlags.noticePeriodRisk !== "")
+      riskItems.push("⏰ " + c.riskFlags.noticePeriodRisk);
 
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-<title>HM Report — ${c.name}</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,'Segoe UI',Arial,sans-serif;background:#f9fafb;color:#111827}@media print{body{background:#fff}.noprint{display:none}}</style>
-</head><body>
-<div class="noprint" style="position:fixed;top:16px;right:16px;z-index:99;display:flex;gap:8px">
-  <button onclick="window.print()" style="background:#1d4ed8;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">🖨 Print / Save PDF</button>
-  <button onclick="window.close()" style="background:#fff;color:#374151;border:1px solid #d1d5db;padding:10px 16px;border-radius:8px;font-size:14px;cursor:pointer">✕</button>
-</div>
-<div style="max-width:900px;margin:0 auto;padding:32px 24px">
+    // Build HTML using string concatenation
+    let html = "";
+    html += "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">";
+    html += "<title>HM Report — " + c.name + "</title>";
+    html += "<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,\'Segoe UI\',Arial,sans-serif;background:#f9fafb;color:#111827}@media print{body{background:#fff}.np{display:none}}</style>";
+    html += "</head><body>";
 
-<!-- HEADER -->
-<div style="background:#0f172a;color:#fff;border-radius:16px;padding:32px;margin-bottom:20px">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start">
-    <div>
-      <div style="font-size:10px;letter-spacing:2px;color:#94a3b8;margin-bottom:6px">HIRING MANAGER REPORT · ${reportLabel.toUpperCase()}</div>
-      <h1 style="font-size:26px;font-weight:800;margin-bottom:4px">${c.name}</h1>
-      <div style="color:#94a3b8;font-size:13px;margin-bottom:10px">${[c.email,c.phone].filter(Boolean).join(" · ")}</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${c.appliedFor?`<span style="background:#1e293b;color:#e2e8f0;padding:4px 12px;border-radius:16px;font-size:12px">💼 ${c.appliedFor}</span>`:""}
-        ${c.domain?`<span style="background:#1e293b;color:#e2e8f0;padding:4px 12px;border-radius:16px;font-size:12px">🏷️ ${c.domain}</span>`:""}
-        ${c.experienceYears?`<span style="background:#1e293b;color:#e2e8f0;padding:4px 12px;border-radius:16px;font-size:12px">📅 ${c.experienceYears} yrs</span>`:""}
-        ${c.seniority?`<span style="background:#1e293b;color:#e2e8f0;padding:4px 12px;border-radius:16px;font-size:12px">🎯 ${c.seniority}</span>`:""}
-      </div>
-    </div>
-    <div style="text-align:right">
-      <div style="font-size:48px;font-weight:900;line-height:1">${finalScore}</div>
-      <div style="color:#94a3b8;font-size:11px;margin-top:2px">Final Score / 100</div>
-      <div style="margin-top:8px;display:flex;gap:6px;justify-content:flex-end">
-        <span style="background:${tierKey==="A"?"#d1fae5":tierKey==="B"?"#dbeafe":"#fef3c7"};color:${tierKey==="A"?"#065f46":tierKey==="B"?"#1e40af":"#92400e"};padding:4px 12px;border-radius:16px;font-size:12px;font-weight:700">${tierKey}-Tier</span>
-      </div>
-      <div style="color:#64748b;font-size:10px;margin-top:6px">${date}</div>
-    </div>
-  </div>
-</div>
+    // Print button
+    html += "<div class=\"np\" style=\"position:fixed;top:16px;right:16px;z-index:99;display:flex;gap:8px\">";
+    html += "<button onclick=\"window.print()\" style=\"background:#1d4ed8;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer\">🖨 Print / Save PDF</button>";
+    html += "<button onclick=\"window.close()\" style=\"background:#fff;color:#374151;border:1px solid #d1d5db;padding:10px 16px;border-radius:8px;font-size:14px;cursor:pointer\">✕ Close</button>";
+    html += "</div>";
 
-<!-- RECOMMENDATION -->
-<div style="background:${rec==="Strong Hire"?"#d1fae5":rec==="Hire"?"#dbeafe":rec==="Consider"?"#fef3c7":rec==="Weak Fit"?"#ffedd5":"#fee2e2"};border:2px solid ${recColor}30;border-radius:12px;padding:18px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center">
-  <div>
-    <div style="font-size:10px;font-weight:600;color:${recColor};text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">HIRING RECOMMENDATION</div>
-    <div style="font-size:22px;font-weight:800;color:${recColor}">${rec}</div>
-  </div>
-  <div style="font-size:13px;color:#374151;max-width:55%;line-height:1.6">${c.recommendationReason||""}</div>
-</div>
+    html += "<div style=\"max-width:900px;margin:0 auto;padding:32px 24px\">";
 
-<!-- SCORE CARDS -->
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
-  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;text-align:center">
-    <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">📄 CV Score</div>
-    <div style="font-size:36px;font-weight:900;color:${sc(cvScore)}">${cvScore}</div>
-    <div style="font-size:10px;color:#9ca3af;margin-top:2px">Skills 70% + Stability 30%</div>
-  </div>
-  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;text-align:center">
-    <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">🎙️ Screening Score</div>
-    <div style="font-size:36px;font-weight:900;color:${screenScore?sc(screenScore):"#d1d5db"}">${screenScore||"—"}</div>
-    <div style="font-size:10px;color:#9ca3af;margin-top:2px">${c.hmReportType==="cv_only"?"Not included":"Technical Screening"}</div>
-  </div>
-  <div style="background:#0f172a;border-radius:12px;padding:18px;text-align:center">
-    <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">🏆 Final Score</div>
-    <div style="font-size:36px;font-weight:900;color:#fff">${finalScore}</div>
-    <div style="font-size:10px;color:#64748b;margin-top:2px">${c.hmReportType==="cv_only"?"CV Score":"CV 60% + Screen 40%"}</div>
-  </div>
-</div>
+    // Header
+    html += "<div style=\"background:#0f172a;color:#fff;border-radius:16px;padding:32px;margin-bottom:20px\">";
+    html += "<div style=\"display:flex;justify-content:space-between;align-items:flex-start\">";
+    html += "<div>";
+    html += "<div style=\"font-size:10px;letter-spacing:2px;color:#94a3b8;margin-bottom:6px\">HIRING MANAGER REPORT · " + reportLabel.toUpperCase() + "</div>";
+    html += "<h1 style=\"font-size:26px;font-weight:800;margin-bottom:4px\">" + c.name + "</h1>";
+    html += "<div style=\"color:#94a3b8;font-size:13px;margin-bottom:10px\">" + [c.email, c.phone].filter(Boolean).join(" · ") + "</div>";
+    html += "<div style=\"display:flex;gap:8px;flex-wrap:wrap\">";
+    if (c.appliedFor) html += "<span style=\"background:#1e293b;color:#e2e8f0;padding:4px 12px;border-radius:16px;font-size:12px\">💼 " + c.appliedFor + "</span>";
+    if (c.domain)     html += "<span style=\"background:#1e293b;color:#e2e8f0;padding:4px 12px;border-radius:16px;font-size:12px\">🏷️ " + c.domain + "</span>";
+    if (c.experienceYears) html += "<span style=\"background:#1e293b;color:#e2e8f0;padding:4px 12px;border-radius:16px;font-size:12px\">📅 " + c.experienceYears + " yrs</span>";
+    if (c.seniority)  html += "<span style=\"background:#1e293b;color:#e2e8f0;padding:4px 12px;border-radius:16px;font-size:12px\">🎯 " + c.seniority + "</span>";
+    html += "</div></div>";
+    html += "<div style=\"text-align:right\">";
+    html += "<div style=\"font-size:48px;font-weight:900;line-height:1\">" + finalScore + "</div>";
+    html += "<div style=\"color:#94a3b8;font-size:11px;margin-top:2px\">Final Score / 100</div>";
+    html += "<div style=\"margin-top:8px;display:flex;gap:6px;justify-content:flex-end\">";
+    html += "<span style=\"background:" + tierBg + ";color:" + tierColor + ";padding:4px 12px;border-radius:16px;font-size:12px;font-weight:700\">" + tierKey + "-Tier</span>";
+    html += "</div><div style=\"color:#64748b;font-size:10px;margin-top:6px\">" + date + "</div>";
+    html += "</div></div></div>";
 
-<!-- SCORE BREAKDOWN TABLE -->
-<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:20px">
-  <div style="padding:14px 18px;background:#f9fafb;border-bottom:1px solid #f3f4f6">
-    <div style="font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:1px">📊 Score Breakdown</div>
-  </div>
-  <table style="width:100%;border-collapse:collapse">
-    <thead><tr style="background:#f9fafb">
-      <th style="padding:8px 14px;text-align:left;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:1px">Parameter</th>
-      <th style="padding:8px 14px;text-align:center;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:1px">Score</th>
-      <th style="padding:8px 14px;text-align:center;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:1px">Weight</th>
-      <th style="padding:8px 14px;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:1px">Visual</th>
-    </tr></thead>
-    <tbody>
-      <tr style="background:#eff6ff"><td colspan="4" style="padding:7px 14px;font-size:11px;font-weight:700;color:#1d4ed8">📄 RESUME MATCH (${cvScore}/100)</td></tr>
-      ${[
-        ["Skills Match & Technical Depth", c.cvScoreBreakdown?.skillsMatchScore||0, "70%"],
-        ["Stability & Reliability",         c.cvScoreBreakdown?.stabilityScore||0,   "30%"],
-      ].map(([l,s,w])=>`<tr style="border-bottom:1px solid #f9fafb">
-        <td style="padding:9px 14px;font-size:12px;color:#374151;padding-left:24px">${l}</td>
-        <td style="padding:9px 14px;text-align:center;font-weight:700;font-size:14px;color:${sc(s as number)}">${s}</td>
-        <td style="padding:9px 14px;text-align:center;font-size:11px;color:#9ca3af">${w}</td>
-        <td style="padding:9px 14px;width:130px">${bar(s as number, sc(s as number))}</td>
-      </tr>`).join("")}
-      ${c.hmReportType!=="cv_only"?`
-      <tr style="background:#f5f3ff"><td colspan="4" style="padding:7px 14px;font-size:11px;font-weight:700;color:#7c3aed">🎙️ TECHNICAL SCREENING (${screenScore}/100)</td></tr>
-      ${[
-        ["Technical Accuracy", c.screeningBreakdown?.technical||0, "40%"],
-        ["Technical Depth",    c.screeningBreakdown?.depth||0,     "40%"],
-        ["Role Relevance",     c.screeningBreakdown?.relevance||0, "20%"],
-      ].map(([l,s,w])=>`<tr style="border-bottom:1px solid #f9fafb">
-        <td style="padding:9px 14px;font-size:12px;color:#374151;padding-left:24px">${l}</td>
-        <td style="padding:9px 14px;text-align:center;font-weight:700;font-size:14px;color:${sc(s as number)}">${s}</td>
-        <td style="padding:9px 14px;text-align:center;font-size:11px;color:#9ca3af">${w}</td>
-        <td style="padding:9px 14px;width:130px">${bar(s as number, sc(s as number))}</td>
-      </tr>`).join("")}` : ""}
-      <tr style="background:#0f172a">
-        <td style="padding:12px 14px;font-size:13px;font-weight:800;color:#fff">🏆 FINAL SCORE</td>
-        <td style="padding:12px 14px;text-align:center;font-size:20px;font-weight:900;color:#fff">${finalScore}</td>
-        <td style="padding:12px 14px;text-align:center;font-size:11px;color:#64748b">${c.hmReportType==="cv_only"?"100%":"60%+40%"}</td>
-        <td style="padding:12px 14px"><span style="background:${rec==="Strong Hire"?"#d1fae5":rec==="Hire"?"#dbeafe":"#fef3c7"};color:${recColor};padding:3px 12px;border-radius:10px;font-size:11px;font-weight:700">${rec}</span></td>
-      </tr>
-    </tbody>
-  </table>
-</div>
+    // Recommendation
+    html += "<div style=\"background:" + recBg + ";border:2px solid " + recColor + "30;border-radius:12px;padding:18px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center\">";
+    html += "<div><div style=\"font-size:10px;font-weight:600;color:" + recColor + ";text-transform:uppercase;letter-spacing:1px;margin-bottom:3px\">HIRING RECOMMENDATION</div>";
+    html += "<div style=\"font-size:22px;font-weight:800;color:" + recColor + "\">" + rec + "</div></div>";
+    if (c.recommendationReason) html += "<div style=\"font-size:13px;color:#374151;max-width:55%;line-height:1.6\">" + c.recommendationReason + "</div>";
+    html += "</div>";
 
-<!-- HM SUMMARY -->
-${(c.hmSummary||c.summary)?`
-<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:20px">
-  <div style="font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">🎯 Hiring Manager Briefing</div>
-  <p style="font-size:13px;color:#374151;line-height:1.75">${c.hmSummary||c.summary}</p>
-</div>`:""}
+    // Score cards
+    html += "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px\">";
+    html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;text-align:center\">";
+    html += "<div style=\"font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px\">📄 CV Score</div>";
+    html += "<div style=\"font-size:36px;font-weight:900;color:" + sc(cvScore) + "\">" + cvScore + "</div>";
+    html += "<div style=\"font-size:10px;color:#9ca3af;margin-top:2px\">Skills 70% + Stability 30%</div></div>";
+    html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;text-align:center\">";
+    html += "<div style=\"font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px\">🎙️ Screening</div>";
+    html += "<div style=\"font-size:36px;font-weight:900;color:" + (screenScore ? sc(screenScore) : "#d1d5db") + "\">" + (screenScore || "—") + "</div>";
+    html += "<div style=\"font-size:10px;color:#9ca3af;margin-top:2px\">" + (c.hmReportType === "cv_only" ? "Not included" : "Technical Interview") + "</div></div>";
+    html += "<div style=\"background:#0f172a;border-radius:12px;padding:18px;text-align:center\">";
+    html += "<div style=\"font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px\">🏆 Final Score</div>";
+    html += "<div style=\"font-size:36px;font-weight:900;color:#fff\">" + finalScore + "</div>";
+    html += "<div style=\"font-size:10px;color:#64748b;margin-top:2px\">" + (c.hmReportType === "cv_only" ? "CV Score Only" : "CV 60% + Screen 40%") + "</div></div>";
+    html += "</div>";
 
-<!-- STRENGTHS & GAPS -->
-${((c.strengths?.length||0)+(c.gaps?.length||0))>0?`
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px">
-  ${(c.strengths?.length||0)>0?`<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:18px">
-    <div style="font-size:12px;font-weight:700;color:#065f46;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">✅ STRENGTHS</div>
-    ${c.strengths!.map(s=>`<div style="font-size:12px;color:#374151;margin-bottom:6px;padding-left:10px;border-left:3px solid #22c55e">${s}</div>`).join("")}
-  </div>`:""}
-  ${(c.gaps?.length||0)>0?`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:18px">
-    <div style="font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">⚠️ CONCERNS</div>
-    ${c.gaps!.map(g=>`<div style="font-size:12px;color:#374151;margin-bottom:6px;padding-left:10px;border-left:3px solid #f59e0b">${g}</div>`).join("")}
-  </div>`:""}
-</div>`:""}
+    // Score breakdown table
+    html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:20px\">";
+    html += "<div style=\"padding:14px 18px;background:#f9fafb;border-bottom:1px solid #f3f4f6\"><div style=\"font-size:13px;font-weight:700;color:#111827\">📊 Score Breakdown</div></div>";
+    html += "<table style=\"width:100%;border-collapse:collapse\">";
+    html += "<thead><tr style=\"background:#f9fafb\">";
+    html += "<th style=\"padding:8px 14px;text-align:left;font-size:11px;color:#6b7280\">Parameter</th>";
+    html += "<th style=\"padding:8px 14px;text-align:center;font-size:11px;color:#6b7280\">Score</th>";
+    html += "<th style=\"padding:8px 14px;text-align:center;font-size:11px;color:#6b7280\">Weight</th>";
+    html += "<th style=\"padding:8px 14px;font-size:11px;color:#6b7280\">Visual</th>";
+    html += "</tr></thead><tbody>";
+    html += "<tr style=\"background:#eff6ff\"><td colspan=\"4\" style=\"padding:7px 14px;font-size:11px;font-weight:700;color:#1d4ed8\">📄 RESUME MATCH (" + cvScore + "/100)</td></tr>";
+    html += scoreRow("Skills Match & Technical Depth", c.cvScoreBreakdown?.skillsMatchScore || 0, "70%");
+    html += scoreRow("Stability & Reliability", c.cvScoreBreakdown?.stabilityScore || 0, "30%");
+    if (c.hmReportType !== "cv_only") {
+      html += "<tr style=\"background:#f5f3ff\"><td colspan=\"4\" style=\"padding:7px 14px;font-size:11px;font-weight:700;color:#7c3aed\">🎙️ TECHNICAL SCREENING (" + screenScore + "/100)</td></tr>";
+      html += scoreRow("Technical Accuracy", c.screeningBreakdown?.technical || 0, "40%");
+      html += scoreRow("Technical Depth",    c.screeningBreakdown?.depth     || 0, "40%");
+      html += scoreRow("Role Relevance",     c.screeningBreakdown?.relevance || 0, "20%");
+    }
+    html += "<tr style=\"background:#0f172a\">";
+    html += "<td style=\"padding:12px 14px;font-size:13px;font-weight:800;color:#fff\">🏆 FINAL SCORE</td>";
+    html += "<td style=\"padding:12px 14px;text-align:center;font-size:20px;font-weight:900;color:#fff\">" + finalScore + "</td>";
+    html += "<td style=\"padding:12px 14px;text-align:center;font-size:11px;color:#64748b\">" + (c.hmReportType === "cv_only" ? "100%" : "60%+40%") + "</td>";
+    html += "<td style=\"padding:12px 14px\"><span style=\"background:" + recBg + ";color:" + recColor + ";padding:3px 12px;border-radius:10px;font-size:11px;font-weight:700\">" + rec + "</span></td>";
+    html += "</tr></tbody></table></div>";
 
-<!-- INTERVIEW FOCUS AREAS -->
-${(c.interviewFocusAreas?.length||0)>0?`
-<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:20px">
-  <div style="font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px">🎯 HM Interview Focus Areas</div>
-  ${c.interviewFocusAreas!.map((a,i)=>`<div style="display:flex;gap:10px;margin-bottom:8px;align-items:flex-start">
-    <span style="min-width:22px;height:22px;background:#0f172a;color:#fff;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">${i+1}</span>
-    <p style="font-size:12px;color:#374151;line-height:1.5">${a}</p>
-  </div>`).join("")}
-</div>`:""}
+    // HM Summary
+    if (c.hmSummary || c.summary) {
+      html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:20px\">";
+      html += "<div style=\"font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px\">🎯 Hiring Manager Briefing</div>";
+      html += "<p style=\"font-size:13px;color:#374151;line-height:1.75\">" + (c.hmSummary || c.summary) + "</p></div>";
+    }
 
-<!-- RISK FLAGS -->
-${riskItems.length>0?`
-<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:18px;margin-bottom:20px">
-  <div style="font-size:12px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">⚠️ RISK FLAGS</div>
-  ${riskItems.map(r=>`<div style="font-size:12px;color:#7f1d1d;margin-bottom:5px">${r}</div>`).join("")}
-</div>`:""}
+    // Strengths & Gaps
+    const hasStrengths = (c.strengths?.length || 0) > 0;
+    const hasGaps      = (c.gaps?.length      || 0) > 0;
+    if (hasStrengths || hasGaps) {
+      html += "<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px\">";
+      if (hasStrengths) {
+        html += "<div style=\"background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:18px\">";
+        html += "<div style=\"font-size:12px;font-weight:700;color:#065f46;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px\">✅ STRENGTHS</div>";
+        c.strengths!.forEach(s => { html += "<div style=\"font-size:12px;color:#374151;margin-bottom:6px;padding-left:10px;border-left:3px solid #22c55e\">" + s + "</div>"; });
+        html += "</div>";
+      }
+      if (hasGaps) {
+        html += "<div style=\"background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:18px\">";
+        html += "<div style=\"font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px\">⚠️ CONCERNS</div>";
+        c.gaps!.forEach(g => { html += "<div style=\"font-size:12px;color:#374151;margin-bottom:6px;padding-left:10px;border-left:3px solid #f59e0b\">" + g + "</div>"; });
+        html += "</div>";
+      }
+      html += "</div>";
+    }
 
-<!-- SCREENING Q&A -->
-${c.hmReportType!=="cv_only"&&(c.screeningAnswers?.length||0)>0?`
-<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:20px">
-  <div style="padding:14px 18px;background:#f9fafb;border-bottom:1px solid #f3f4f6">
-    <div style="font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:1px">🎙️ Technical Screening Q&A</div>
-  </div>
-  ${c.screeningAnswers!.map((a,i)=>`<div style="padding:14px 18px;border-bottom:1px solid #f9fafb">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
-      <div style="font-size:12px;font-weight:600;color:#374151;flex:1">Q${i+1}: ${a.question||""}</div>
-      ${a.aiScore!=null?`<span style="background:${(a.aiScore||0)>=80?"#d1fae5":(a.aiScore||0)>=60?"#dbeafe":"#fef3c7"};color:${sc(a.aiScore||0)};padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;margin-left:10px">${a.aiScore}/100</span>`:""}
-    </div>
-    ${a.aiFeedback?`<div style="font-size:11px;color:#6b7280;font-style:italic">💡 ${a.aiFeedback}</div>`:""}
-  </div>`).join("")}
-</div>`:""}
+    // Interview Focus Areas
+    if ((c.interviewFocusAreas?.length || 0) > 0) {
+      html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:20px\">";
+      html += "<div style=\"font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px\">🎯 HM Interview Focus Areas</div>";
+      c.interviewFocusAreas!.forEach((a, i) => {
+        html += "<div style=\"display:flex;gap:10px;margin-bottom:8px;align-items:flex-start\">";
+        html += "<span style=\"min-width:22px;height:22px;background:#0f172a;color:#fff;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700\">" + (i + 1) + "</span>";
+        html += "<p style=\"font-size:12px;color:#374151;line-height:1.5\">" + a + "</p></div>";
+      });
+      html += "</div>";
+    }
 
-<!-- TECH STACK -->
-${((c.databases?.length||0)+(c.frameworks?.length||0)+(c.tools?.length||0))>0?`
-<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:20px">
-  <div style="font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px">💻 Tech Stack</div>
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
-    ${(c.databases?.length||0)>0?`<div><div style="font-size:10px;color:#6b7280;font-weight:600;margin-bottom:6px">🗄️ DATABASES</div><div style="display:flex;flex-wrap:wrap;gap:5px">${c.databases!.map(d=>`<span style="background:#fff7ed;color:#c2410c;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid #fed7aa">${d}</span>`).join("")}</div></div>`:""}
-    ${(c.frameworks?.length||0)>0?`<div><div style="font-size:10px;color:#6b7280;font-weight:600;margin-bottom:6px">⚙️ FRAMEWORKS</div><div style="display:flex;flex-wrap:wrap;gap:5px">${c.frameworks!.map(f=>`<span style="background:#f5f3ff;color:#6d28d9;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid #ddd6fe">${f}</span>`).join("")}</div></div>`:""}
-    ${(c.tools?.length||0)>0?`<div><div style="font-size:10px;color:#6b7280;font-weight:600;margin-bottom:6px">🛠️ TOOLS</div><div style="display:flex;flex-wrap:wrap;gap:5px">${c.tools!.map(t=>`<span style="background:#f9fafb;color:#374151;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid #e5e7eb">${t}</span>`).join("")}</div></div>`:""}
-  </div>
-</div>`:""}
+    // Risk Flags
+    if (riskItems.length > 0) {
+      html += "<div style=\"background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:18px;margin-bottom:20px\">";
+      html += "<div style=\"font-size:12px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px\">⚠️ RISK FLAGS</div>";
+      riskItems.forEach(r => { html += "<div style=\"font-size:12px;color:#7f1d1d;margin-bottom:5px\">" + r + "</div>"; });
+      html += "</div>";
+    }
 
-<!-- FOOTER -->
-<div style="border-top:1px solid #e5e7eb;padding-top:14px;display:flex;justify-content:space-between">
-  <div style="font-size:10px;color:#9ca3af">Generated by ASKY RecruitIQ · ${date}</div>
-  <div style="font-size:10px;color:#9ca3af">Confidential — Internal Use Only</div>
-</div>
+    // Screening Q&A
+    if (c.hmReportType !== "cv_only" && (c.screeningAnswers?.length || 0) > 0) {
+      html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:20px\">";
+      html += "<div style=\"padding:14px 18px;background:#f9fafb;border-bottom:1px solid #f3f4f6\"><div style=\"font-size:13px;font-weight:700;color:#111827\">🎙️ Technical Screening Q&A</div></div>";
+      c.screeningAnswers!.forEach((a, i) => {
+        html += "<div style=\"padding:14px 18px;border-bottom:1px solid #f9fafb\">";
+        html += "<div style=\"display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px\">";
+        html += "<div style=\"font-size:12px;font-weight:600;color:#374151;flex:1\">Q" + (i + 1) + ": " + (a.question || "") + "</div>";
+        if (a.aiScore != null) {
+          html += "<span style=\"background:" + bg(a.aiScore || 0) + ";color:" + sc(a.aiScore || 0) + ";padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;margin-left:10px\">" + a.aiScore + "/100</span>";
+        }
+        html += "</div>";
+        if (a.aiFeedback) html += "<div style=\"font-size:11px;color:#6b7280;font-style:italic\">💡 " + a.aiFeedback + "</div>";
+        html += "</div>";
+      });
+      html += "</div>";
+    }
 
-</div></body></html>`;
+    // Tech Stack
+    const hasDbs  = (c.databases?.length  || 0) > 0;
+    const hasFws  = (c.frameworks?.length  || 0) > 0;
+    const hasTools = (c.tools?.length      || 0) > 0;
+    if (hasDbs || hasFws || hasTools) {
+      html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:20px\">";
+      html += "<div style=\"font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px\">💻 Tech Stack</div>";
+      html += "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:12px\">";
+      if (hasDbs) {
+        html += "<div><div style=\"font-size:10px;color:#6b7280;font-weight:600;margin-bottom:6px\">🗄️ DATABASES</div><div style=\"display:flex;flex-wrap:wrap;gap:5px\">";
+        c.databases!.forEach(d => { html += "<span style=\"background:#fff7ed;color:#c2410c;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid #fed7aa\">" + d + "</span>"; });
+        html += "</div></div>";
+      }
+      if (hasFws) {
+        html += "<div><div style=\"font-size:10px;color:#6b7280;font-weight:600;margin-bottom:6px\">⚙️ FRAMEWORKS</div><div style=\"display:flex;flex-wrap:wrap;gap:5px\">";
+        c.frameworks!.forEach(f => { html += "<span style=\"background:#f5f3ff;color:#6d28d9;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid #ddd6fe\">" + f + "</span>"; });
+        html += "</div></div>";
+      }
+      if (hasTools) {
+        html += "<div><div style=\"font-size:10px;color:#6b7280;font-weight:600;margin-bottom:6px\">🛠️ TOOLS</div><div style=\"display:flex;flex-wrap:wrap;gap:5px\">";
+        c.tools!.forEach(t => { html += "<span style=\"background:#f9fafb;color:#374151;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid #e5e7eb\">" + t + "</span>"; });
+        html += "</div></div>";
+      }
+      html += "</div></div>";
+    }
 
-    const w = window.open("","_blank","width=1000,height=800");
+    // Footer
+    html += "<div style=\"border-top:1px solid #e5e7eb;padding-top:14px;display:flex;justify-content:space-between\">";
+    html += "<div style=\"font-size:10px;color:#9ca3af\">Generated by ASKY RecruitIQ · " + date + "</div>";
+    html += "<div style=\"font-size:10px;color:#9ca3af\">Confidential — Internal Use Only</div>";
+    html += "</div></div></body></html>";
+
+    const w = window.open("", "_blank", "width=1000,height=800");
     if (w) { w.document.write(html); w.document.close(); }
   }
+
 
   if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"/></div>;
   if (!candidate) return <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-500">Candidate not found</div>;

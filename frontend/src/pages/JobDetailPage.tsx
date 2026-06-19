@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import ShareJobButton from "../components/ShareJobButton";
 
@@ -136,7 +136,7 @@ export default function JobDetailPage() {
     if (!files?.length) return;
     setUploading(true);
     const fd = new FormData();
-    Array.from(files).forEach(f => fd.append("resumes", f));
+    Array.from(files).forEach((f: File) => fd.append("resumes", f));
     fd.append("jobId", id||""); fd.append("jobTitle", job?.title||"");
     try {
       await fetch(`${API}/resumes/upload`, { method:"POST", headers:{Authorization:`Bearer ${token}`}, body:fd });
@@ -195,7 +195,7 @@ export default function JobDetailPage() {
 
   // ── Word / Text file import ───────────────────────────────
   async function handleFileImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const file: File | undefined = e.target.files?.[0];
     if (!file) return;
 
     const fname = file.name.toLowerCase();
@@ -209,7 +209,7 @@ export default function JobDetailPage() {
     try {
       // Upload to backend — server uses mammoth for DOCX (reliable, no browser issues)
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", file as Blob);
 
       const res = await fetch(`${API}/jobs/${id}/question-bank/upload`, {
         method: "POST",

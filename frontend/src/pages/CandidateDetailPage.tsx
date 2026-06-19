@@ -21,6 +21,7 @@ interface Candidate {
   aiScore?: number; score?: number;
   cvScoreBreakdown?: { skillsMatchScore?: number; stabilityScore?: number };
   screeningScore?: number; screeningBreakdown?: Breakdown;
+  roleType?: "technical"|"non_technical";
   screeningSessions?: Session[];
   interviewQuestions?: string[];
   screeningAnswers?: Answer[];
@@ -152,7 +153,12 @@ export default function CandidateDetailPage() {
       const r = await fetch(`${API}/candidates/${id}/questions`, {
         method:"POST",
         headers:{"Content-Type":"application/json", Authorization:`Bearer ${token}`},
-        body: JSON.stringify({ jobTitle:candidate.appliedFor||candidate.jobTitle, skills:candidate.topSkills, difficulty }),
+        body: JSON.stringify({
+          jobTitle: candidate.appliedFor||candidate.jobTitle,
+          skills:   candidate.topSkills,
+          difficulty,
+          roleType: roleType,
+        }),
       });
       const d = await r.json();
       if (!r.ok) { alert(d.message||"Failed to generate questions"); return; }
@@ -455,10 +461,10 @@ export default function CandidateDetailPage() {
   if (!candidate) return <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-500">Candidate not found</div>;
 
   const cvScore      = candidate.aiScore || candidate.score || 0;
-  // screeningScore is 0 until candidate actually completes screening — show as null until then
+  const roleType     = candidate.roleType || (candidate.jobId?.roleType) || "technical";
+  const isTech       = roleType !== "non_technical";
   const rawScreen    = candidate.screeningScore;
   const screenScore  = (rawScreen && rawScreen > 0) ? rawScreen : null;
-  // combinedScore: use stored value if screening done, else just cv score
   const combined     = (candidate.combinedScore && candidate.combinedScore > 0 && screenScore)
     ? candidate.combinedScore
     : cvScore;
@@ -655,8 +661,8 @@ export default function CandidateDetailPage() {
                 <tbody className="divide-y divide-gray-50">
                   <tr className="bg-blue-50"><td className="px-5 py-3 font-bold text-blue-700 text-sm" colSpan={4}>📄 Resume Match ({cvScore}/100)</td></tr>
                   {[
-                    {label:"Skills Match & Technical Depth",score:candidate.cvScoreBreakdown?.skillsMatchScore||0,weight:"70%",color:"bg-blue-500"},
-                    {label:"Stability & Reliability",         score:candidate.cvScoreBreakdown?.stabilityScore||0,  weight:"30%",color:"bg-indigo-500"},
+                    {label: isTech ? "Skills Match & Technical Depth" : "Experience Relevance to Role", score:candidate.cvScoreBreakdown?.skillsMatchScore||0, weight: isTech?"70%":"60%", color:"bg-blue-500"},
+                    {label:"Stability & Reliability", score:candidate.cvScoreBreakdown?.stabilityScore||0, weight: isTech?"30%":"40%", color:"bg-indigo-500"},
                   ].map(r=>(
                     <tr key={r.label} className="hover:bg-gray-50">
                       <td className="px-5 py-3 text-sm text-gray-700 pl-9">{r.label}</td>
@@ -667,12 +673,19 @@ export default function CandidateDetailPage() {
                   ))}
                   {hasScreening && screenScore !== null ? (
                     <>
-                      <tr className="bg-purple-50"><td className="px-5 py-3 font-bold text-purple-700 text-sm" colSpan={4}>🎙️ Technical Screening ({screenScore}/100)</td></tr>
-                      {[
-                        {label:"Technical Accuracy",score:candidate.screeningBreakdown?.technical||0,weight:"40%",color:"bg-purple-500"},
-                        {label:"Technical Depth",   score:candidate.screeningBreakdown?.depth||0,    weight:"40%",color:"bg-violet-500"},
-                        {label:"Role Relevance",    score:candidate.screeningBreakdown?.relevance||0,weight:"20%",color:"bg-fuchsia-500"},
-                      ].map(r=>(
+                      <tr className="bg-purple-50"><td className="px-5 py-3 font-bold text-purple-700 text-sm" colSpan={4}>
+                        {isTech ? "🎙️ Technical Screening" : "🎙️ Functional Screening"} ({screenScore}/100)
+                      </td></tr>
+                      {(isTech ? [
+                        {label:"Technical Accuracy",score:candidate.screeningBreakdown?.technical||0,    weight:"40%",color:"bg-purple-500"},
+                        {label:"Technical Depth",   score:candidate.screeningBreakdown?.depth||0,        weight:"40%",color:"bg-violet-500"},
+                        {label:"Role Relevance",    score:candidate.screeningBreakdown?.relevance||0,    weight:"20%",color:"bg-fuchsia-500"},
+                      ] : [
+                        {label:"Domain Knowledge",      score:(candidate.screeningBreakdown as any)?.domain||0,             weight:"30%",color:"bg-purple-500"},
+                        {label:"Communication & Clarity",score:(candidate.screeningBreakdown as any)?.communication||0,     weight:"30%",color:"bg-violet-500"},
+                        {label:"Problem Solving",        score:(candidate.screeningBreakdown as any)?.problemSolving||0,    weight:"20%",color:"bg-fuchsia-500"},
+                        {label:"Role Understanding",     score:(candidate.screeningBreakdown as any)?.roleUnderstanding||0, weight:"20%",color:"bg-pink-500"},
+                      ]).map(r=>(
                         <tr key={r.label} className="hover:bg-gray-50">
                           <td className="px-5 py-3 text-sm text-gray-700 pl-9">{r.label}</td>
                           <td className="px-5 py-3 text-center font-bold text-gray-900">{r.score}</td>
@@ -758,6 +771,21 @@ export default function CandidateDetailPage() {
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
               <h2 className="font-bold text-gray-900 text-lg mb-4">Generate Interview Questions</h2>
 
+              {/* Role Type Badge */}
+              <div className={`mb-4 flex items-center gap-3 px-4 py-3 rounded-xl ${isTech?"bg-blue-50 border border-blue-100":"bg-amber-50 border border-amber-100"}`}>
+                <span className="text-lg">{isTech ? "💻" : "🤝"}</span>
+                <div>
+                  <p className={`text-sm font-bold ${isTech?"text-blue-800":"text-amber-800"}`}>
+                    {isTech ? "Technical Role" : "Non-Technical Role"}
+                  </p>
+                  <p className={`text-xs ${isTech?"text-blue-600":"text-amber-600"}`}>
+                    {isTech
+                      ? "Questions will focus on technical skills, system design, and coding knowledge"
+                      : "Questions will focus on domain knowledge, communication, judgment, and role fit"}
+                  </p>
+                </div>
+              </div>
+
               {/* Mode Toggle */}
               <div className="bg-gray-100 rounded-2xl p-1.5 flex gap-1 mb-5">
                 <button onClick={()=>setQMode("ai")}
@@ -773,9 +801,15 @@ export default function CandidateDetailPage() {
               {/* AI Mode */}
               {qMode==="ai" && (
                 <div className="space-y-4">
-                  <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-                    <p className="text-sm font-bold text-blue-900 mb-1">🤖 AI generates 8 technical questions</p>
-                    <p className="text-xs text-blue-600">Based on candidate's skills: {(candidate.topSkills||[]).slice(0,3).join(", ")||"General"}</p>
+                  <div className={`rounded-xl p-4 border ${isTech?"bg-blue-50 border-blue-100":"bg-amber-50 border-amber-100"}`}>
+                    <p className={`text-sm font-bold mb-1 ${isTech?"text-blue-900":"text-amber-900"}`}>
+                      {isTech ? "🤖 AI generates 8 technical questions" : "🤖 AI generates 8 role-specific questions"}
+                    </p>
+                    <p className={`text-xs ${isTech?"text-blue-600":"text-amber-600"}`}>
+                      {isTech
+                        ? `Based on skills: ${(candidate.topSkills||[]).slice(0,3).join(", ")||"General"}`
+                        : `Based on domain: ${candidate.domain||candidate.appliedFor||"General"} — scenario & behavioral questions`}
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Difficulty Level</p>

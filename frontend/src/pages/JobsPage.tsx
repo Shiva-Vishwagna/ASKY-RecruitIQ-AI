@@ -33,6 +33,7 @@ export default function JobsPage() {
   const [newJob, setNewJob]           = useState({
     title: "", department: "", location: "", description: "",
     primarySkill: "", level: "Mid", requiredSkills: [] as string[], minAiScore: 60,
+    roleType: "technical" as "technical"|"non_technical",
   });
   const [creating, setCreating]       = useState(false);
 
@@ -78,7 +79,7 @@ export default function JobsPage() {
       });
       if (res.ok) {
         setShowModal(false);
-        setNewJob({ title: "", department: "", location: "", description: "", primarySkill: "", level: "Mid", requiredSkills: [], minAiScore: 60 });
+        setNewJob({ title: "", department: "", location: "", description: "", primarySkill: "", level: "Mid", requiredSkills: [], minAiScore: 60, roleType: "technical" } as any);
         fetchJobs();
       }
     } finally { setCreating(false); }
@@ -352,6 +353,32 @@ export default function JobsPage() {
                     <input type="number" min="0" max="100" value={newJob.minAiScore}
                       onChange={e => setNewJob({ ...newJob, minAiScore: Number(e.target.value) })}
                       className="w-full border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                  </div>
+                </div>
+                {/* Role Type Toggle */}
+                <div className="col-span-2">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Role Type</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button type="button" onClick={() => setNewJob({...newJob, roleType: "technical" as any})}
+                      className={`p-4 rounded-xl border-2 text-left transition-all ${(newJob as any).roleType === "non_technical" ? "border-gray-200" : "border-blue-500 bg-blue-50"}`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xl">💻</span>
+                        <span className="font-bold text-gray-900">Technical / IT Role</span>
+                        {(newJob as any).roleType !== "non_technical" && <span className="ml-auto text-blue-600 text-xs font-bold bg-blue-100 px-2 py-0.5 rounded-full">Selected</span>}
+                      </div>
+                      <p className="text-xs text-gray-500">Software, Engineering, DevOps, Data, Product</p>
+                      <p className="text-xs text-gray-400 mt-0.5">CV: Skills depth 70% + Stability 30%</p>
+                    </button>
+                    <button type="button" onClick={() => setNewJob({...newJob, roleType: "non_technical" as any})}
+                      className={`p-4 rounded-xl border-2 text-left transition-all ${(newJob as any).roleType === "non_technical" ? "border-amber-500 bg-amber-50" : "border-gray-200"}`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xl">🤝</span>
+                        <span className="font-bold text-gray-900">Non-Technical Role</span>
+                        {(newJob as any).roleType === "non_technical" && <span className="ml-auto text-amber-600 text-xs font-bold bg-amber-100 px-2 py-0.5 rounded-full">Selected</span>}
+                      </div>
+                      <p className="text-xs text-gray-500">Sales, Travel, HR, Ops, Marketing, Finance</p>
+                      <p className="text-xs text-gray-400 mt-0.5">CV: Experience relevance 60% + Stability 40%</p>
+                    </button>
                   </div>
                 </div>
                 <div>

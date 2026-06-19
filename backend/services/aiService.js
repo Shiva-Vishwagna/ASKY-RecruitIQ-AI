@@ -3,93 +3,98 @@ const Groq = require('groq-sdk');
 /**
  * RECRUIT IQ — AI SERVICE
  * ========================
- * Thinking as: Senior Technical Recruiter + Hiring Manager + Recruiting Manager
+ * Supports two job types:
  *
- * SCORING PHILOSOPHY:
- * - CV Score = Skills depth (70%) + Stability (30%)
- *   → Skills: Does the candidate ACTUALLY know the required tech? Not just listed it.
- *   → Stability: Are they reliable? Frequent job changes = risk.
+ * TECHNICAL (IT/Engineering):
+ *   CV Score    = Skills depth (70%) + Stability (30%)
+ *   Screening   = Technical accuracy (40%) + Technical depth (40%) + Role relevance (20%)
  *
- * - Screening Score = Technical accuracy (40%) + Depth (40%) + Role relevance (20%)
- *   → Pure technical merit. No soft skills, no behavioral scoring.
+ * NON-TECHNICAL (Sales, Travel, HR, Ops, Marketing etc):
+ *   CV Score    = Experience relevance (60%) + Stability (40%)
+ *   Screening   = Domain knowledge (30%) + Communication & clarity (30%) +
+ *                 Problem solving (20%) + Role understanding (20%)
  *
- * - Combined = CV (60%) + Screening (40%) — configurable per job
+ * Combined = CV (60%) + Screening (40%) — configurable per job
  *
- * RECOMMENDATION SCALE:
- * 85+ → Strong Hire   (Proceed immediately, strong technical fit)
- * 72-84 → Hire        (Good fit, proceed with confidence)
- * 58-71 → Consider    (Has potential but gaps — discuss with HM)
- * 42-57 → Weak Fit    (Significant gaps, proceed only if pipeline is thin)
- * <42  → Reject       (Not a fit for this role)
+ * Recommendation scale (same for both):
+ *   85+ Strong Hire · 72+ Hire · 58+ Consider · 42+ Weak Fit · <42 Reject
  */
 
 // ── CV Analysis Prompt ────────────────────────────────────────
-const PROMPT_TEMPLATE = (jobContext, rawText) => {
-  const jobTitle       = typeof jobContext === 'string' ? jobContext : (jobContext.title || 'Software Engineer');
-  const primarySkill   = typeof jobContext === 'object' ? (jobContext.primarySkill  || '') : '';
+const CV_PROMPT = (jobContext, rawText) => {
+  const jobTitle    = typeof jobContext === 'string' ? jobContext : (jobContext.title || 'Professional');
+  const roleType    = typeof jobContext === 'object'  ? (jobContext.roleType || 'technical') : 'technical';
+  const primarySkill  = typeof jobContext === 'object' ? (jobContext.primarySkill  || '') : '';
   const requiredSkills = typeof jobContext === 'object' ? (jobContext.requiredSkills || []) : [];
-  const level          = typeof jobContext === 'object' ? (jobContext.level          || '') : '';
+  const level          = typeof jobContext === 'object' ? (jobContext.level || '') : '';
+  const isTech = roleType !== 'non_technical';
 
-  return `You are a Senior Technical Recruiter with 15 years of experience. Analyze this CV for the role below.
+  const scoringInstructions = isTech ? `
+ROLE TYPE: TECHNICAL / IT
+CV SCORING — 2 factors:
 
-═══════════════════════════════════════════
-JOB REQUIREMENTS
-═══════════════════════════════════════════
-Role: ${jobTitle}
-Level: ${level || 'Not specified'}
-Primary Skill: ${primarySkill || 'Not specified'}
-Required Skills: ${requiredSkills.join(', ') || 'Not specified'}
+1. skillsMatchScore (70%): Depth of technical knowledge vs requirements
+   - NOT just whether skills are mentioned — check actual usage and depth
+   - 90+: Expert in primary skill + all required skills, production projects
+   - 70-89: Proficient, solid experience, minor gaps
+   - 50-69: Has primary skill but gaps in required skills
+   - Below 50: Missing primary skill or major mismatch
 
-═══════════════════════════════════════════
-SCORING RULES (READ CAREFULLY)
-═══════════════════════════════════════════
-${primarySkill ? `
-CRITICAL: Primary skill "${primarySkill}" check:
-- NOT present in CV at all → skillsMatchScore MAX 30, aiScore MAX 35
-- Mentioned but not as core skill → skillsMatchScore MAX 55, aiScore MAX 60
-- Present as secondary skill → skillsMatchScore MAX 70, aiScore MAX 72
-- Present as primary skill → score based on depth and required skills match
+2. stabilityScore (30%): Job tenure reliability
+   - 90+: 2.5+ years average, no gaps
+   - 70-89: Mostly stable, one or two short stints with reason
+   - 50-69: Some short tenures (<1 year)
+   - Below 50: Multiple roles under 6 months (flight risk)
 
-Wrong domain penalty (e.g. Java dev applying for React role):
-- Score 25-40 MAXIMUM regardless of experience level` : ''}
+${primarySkill ? `CRITICAL: "${primarySkill}" is primary skill. Not present → aiScore MAX 35. Wrong domain → MAX 45.` : ''}
+` : `
+ROLE TYPE: NON-TECHNICAL (${jobTitle})
+This is NOT an IT/engineering role. Evaluate domain experience and soft competencies.
 
-SKILLS MATCH (70% of CV score):
-- Score the DEPTH of technical knowledge, not just presence of skill names
-- 90+: Expert — multiple years with primary skill, production projects, advanced usage
-- 75-89: Proficient — solid experience, good depth, minor gaps in required skills
-- 60-74: Competent — has the skills but limited depth or missing some required
-- 45-59: Basic — has primary skill but significant gaps in required skills
-- Below 45: Missing primary skill or major skills mismatch
+CV SCORING — 2 factors:
 
-STABILITY (30% of CV score):
-- 90+: 2.5+ years average tenure, no gaps
-- 75-89: Mix of tenures, mostly 1.5+ years, one or two shorter stints with valid reason
-- 60-74: Some short tenures (under 1 year) but overall reasonable
-- Below 60: Multiple roles under 1 year — flight risk
+1. experienceRelevanceScore (60%): How relevant is the candidate's work experience to THIS role?
+   - Evaluate industry match, job function match, and seniority appropriateness
+   - 90+: Direct experience in same role/industry, strong track record
+   - 70-89: Related experience, transferable skills, good domain knowledge
+   - 50-69: Some relevant experience but significant gaps
+   - Below 50: Mostly unrelated experience
 
-═══════════════════════════════════════════
-RISK FLAGS — detect from CV:
-═══════════════════════════════════════════
+2. stabilityScore (40%): Job tenure and career progression
+   - 90+: Consistent tenure 2+ years, clear career progression
+   - 70-89: Mostly stable, one or two moves are understandable
+   - Below 60: Frequent job changes with no clear career arc
+
+IMPORTANT: Do NOT penalize for not having IT/technical skills. This is a ${jobTitle} role.
+`;
+
+  return `You are a Senior Talent Acquisition expert. Analyze this CV for the specific role below.
+
+ROLE: ${jobTitle}
+${level ? `LEVEL: ${level}` : ''}
+${primarySkill ? `PRIMARY SKILL/FOCUS: ${primarySkill}` : ''}
+${requiredSkills.length ? `REQUIREMENTS: ${requiredSkills.join(', ')}` : ''}
+
+${scoringInstructions}
+
+RISK FLAGS to detect:
 - frequentJobChanges: true if 2+ consecutive roles under 1 year
-- missingMandatorySkills: which required skills are clearly absent from CV
-- domainMismatch: true if candidate's domain fundamentally doesn't match role
+- missingMandatorySkills: list requirements clearly absent from CV
+- domainMismatch: true if candidate background fundamentally doesn't match role
 
-═══════════════════════════════════════════
-HM SUMMARY — write as if briefing the Hiring Manager before interview:
-═══════════════════════════════════════════
-4-5 sentences covering:
-1. Technical profile summary
-2. Strongest technical areas
+HM SUMMARY: Write 4-5 sentences as a briefing to the Hiring Manager covering:
+1. What this candidate has done and their background
+2. Strongest relevant areas for THIS role
 3. Key gaps or concerns
-4. Stability assessment
-5. Hire/No-hire rationale for THIS specific role
+4. Stability / career progression assessment
+5. Clear hire/no-hire rationale
 
 Return ONLY valid JSON, no markdown, no extra text:
 {
   "name": "full name",
   "email": "email or empty string",
   "phone": "phone or empty string",
-  "domain": "primary tech domain",
+  "domain": "primary domain e.g. Java Backend, Travel & Hospitality, Sales",
   "seniority": "Junior or Mid or Senior or Lead",
   "experience_years": 5,
   "topSkills": ["skill1","skill2","skill3","skill4","skill5"],
@@ -112,50 +117,58 @@ Return ONLY valid JSON, no markdown, no extra text:
     "domainMismatch": false
   },
 
-  "summary": "2-3 sentences on technical fit for ${jobTitle}",
+  "summary": "2-3 sentences on fit for ${jobTitle}",
   "hmSummary": "4-5 sentence HM briefing as described above",
 
-  "technicalExperience": "2-3 sentences about technical stack and projects",
+  "technicalExperience": "2-3 sentences about experience and projects",
   "leadershipExperience": "1-2 sentences or None mentioned",
   "cloudExpertise": "1-2 sentences or None mentioned",
 
-  "databases":      ["PostgreSQL"],
-  "frameworks":     ["Spring Boot"],
-  "tools":          ["Docker","Git"],
-  "projectDomains": ["Banking"],
+  "databases":      [],
+  "frameworks":     [],
+  "tools":          [],
+  "projectDomains": [],
 
-  "strengths": ["Specific technical strength for this role","Another technical strength"],
-  "gaps":      ["Specific gap vs role requirements","Another gap"],
+  "strengths": ["Relevant strength 1","Relevant strength 2"],
+  "gaps":      ["Gap 1 vs role requirements","Gap 2"],
 
   "skillScores": [
-    {"skill": "${primarySkill || 'Primary Skill'}", "score": 85},
-    {"skill": "Another key skill", "score": 70}
+    {"skill": "${primarySkill || 'Key Skill'}", "score": 85}
   ],
 
   "interviewFocusAreas": [
-    "Probe ${primarySkill || 'primary skill'} depth — ask for specific production examples",
-    "Technical area to explore further",
-    "Gap area to validate"
+    "Area to probe in HM interview",
+    "Gap to validate",
+    "Experience to verify"
   ],
 
   "recommendation": "Strong Hire or Hire or Consider or Weak Fit or Reject",
-  "recommendationReason": "2-3 sentences on why this candidate fits or doesn't fit ${jobTitle}"
+  "recommendationReason": "2-3 sentences on why this candidate fits or doesn't"
 }
 
-Resume:
+Resume text:
 ${rawText.slice(0, 4500)}`;
 };
 
-// ── Calculate final CV score ─────────────────────────────────
-// Skills: 70%, Stability: 30%
-function calculateCVScore(breakdown) {
+// ── Calculate CV score ────────────────────────────────────────
+function calculateCVScore(breakdown, roleType) {
   if (!breakdown) return 0;
-  const skills    = Math.min(100, Math.max(0, Number(breakdown.skillsMatchScore || 0)));
-  const stability = Math.min(100, Math.max(0, Number(breakdown.stabilityScore   || 0)));
-  return Math.round((skills * 0.70) + (stability * 0.30));
+  const isTech = roleType !== 'non_technical';
+
+  if (isTech) {
+    // Technical: skills(70%) + stability(30%)
+    const skills    = Math.min(100, Math.max(0, Number(breakdown.skillsMatchScore || 0)));
+    const stability = Math.min(100, Math.max(0, Number(breakdown.stabilityScore   || 0)));
+    return Math.round((skills * 0.70) + (stability * 0.30));
+  } else {
+    // Non-technical: experience relevance(60%) + stability(40%)
+    // Use skillsMatchScore field to store experience relevance for consistency
+    const experience = Math.min(100, Math.max(0, Number(breakdown.skillsMatchScore || 0)));
+    const stability  = Math.min(100, Math.max(0, Number(breakdown.stabilityScore   || 0)));
+    return Math.round((experience * 0.60) + (stability * 0.40));
+  }
 }
 
-// ── Determine tier from CV score ─────────────────────────────
 function determineTier(score) {
   if (score >= 78) return 'A-Tier';
   if (score >= 60) return 'B-Tier';
@@ -171,18 +184,16 @@ async function getProvidersFromDB() {
       const active = settings.aiProviders
         .filter(p => p.enabled && (p.apiKey || p.provider === 'ollama'))
         .sort((a, b) => a.priority - b.priority);
-      if (active.length) {
-        console.log(`[AI] DB providers: ${active.map(p => p.name).join(', ')}`);
-        return active;
-      }
+      if (active.length) return active;
     }
-  } catch (e) { console.log('[AI] DB provider load failed:', e.message); }
+  } catch (e) { /* ignore */ }
   return null;
 }
 
-// ── Main CV screening ────────────────────────────────────────
+// ── Main CV screening ─────────────────────────────────────────
 async function screenResumeWithAI(rawText, jobContext) {
-  const prompt = PROMPT_TEMPLATE(jobContext, rawText);
+  const prompt = CV_PROMPT(jobContext, rawText);
+  const roleType = typeof jobContext === 'object' ? (jobContext.roleType || 'technical') : 'technical';
 
   const dbProviders = await getProvidersFromDB();
   if (dbProviders?.length) {
@@ -190,11 +201,8 @@ async function screenResumeWithAI(rawText, jobContext) {
       try {
         const result = await callProvider(p.provider, p.apiKey, p.model, p.baseUrl, prompt);
         if (result) {
-          if (result.cvScoreBreakdown) {
-            result.aiScore = calculateCVScore(result.cvScoreBreakdown);
-          }
-          result.tier = determineTier(result.aiScore);
-          console.log(`[AI] CV screened with ${p.name} → Score: ${result.aiScore} (${result.tier})`);
+          result.aiScore = calculateCVScore(result.cvScoreBreakdown, roleType);
+          result.tier    = determineTier(result.aiScore);
           return result;
         }
       } catch (e) { console.log(`[AI] ${p.name} failed: ${e.message}`); }
@@ -212,113 +220,105 @@ async function screenResumeWithAI(rawText, jobContext) {
     try {
       const result = await fn();
       if (result) {
-        if (result.cvScoreBreakdown) result.aiScore = calculateCVScore(result.cvScoreBreakdown);
-        result.tier = determineTier(result.aiScore);
-        console.log(`[AI] CV screened with ${name} → Score: ${result.aiScore} (${result.tier})`);
+        result.aiScore = calculateCVScore(result.cvScoreBreakdown, roleType);
+        result.tier    = determineTier(result.aiScore);
+        console.log(`[AI] CV screened with ${name} → ${result.aiScore} (${result.tier})`);
         return result;
       }
     } catch (e) { console.log(`[AI] ${name} failed: ${e.message}`); }
   }
 
-  console.warn('[AI] All providers failed — CV screening returned null');
+  console.warn('[AI] All providers failed');
   return null;
 }
 
-// ── Score interview answers — TECHNICAL ONLY ─────────────────
-// Criteria:
-//   Technical Accuracy (40%): Are facts correct? No misconceptions?
-//   Technical Depth (40%): Shows real hands-on knowledge, not textbook?
-//   Role Relevance (20%): Answer relevant to what THIS role needs?
+// ── Score screening answers ───────────────────────────────────
+// Technical roles: accuracy + depth + relevance
+// Non-technical roles: domain knowledge + communication + problem solving + role understanding
 async function scoreScreeningAnswers(answers, candidateContext) {
-  const { appliedFor = 'Software Engineer', topSkills = [], domain = '' } = candidateContext;
+  const { appliedFor = 'Professional', topSkills = [], domain = '', roleType = 'technical' } = candidateContext;
+  const isTech  = roleType !== 'non_technical';
   const scoredAnswers = [];
   let totalScore = 0;
 
   for (const { question, answer } of answers) {
-    let accuracy  = 0;
-    let depth     = 0;
-    let relevance = 0;
-    let overall   = 0;
-    let feedback  = '';
+    let score1 = 0, score2 = 0, score3 = 0, score4 = 0;
+    let overall = 0, feedback = '';
 
     if (answer?.trim() && process.env.GROQ_API_KEY) {
       try {
         const groq   = new Groq({ apiKey: process.env.GROQ_API_KEY });
-        const prompt = `You are a Principal Engineer conducting a technical interview.
-Evaluate this answer on TECHNICAL MERIT ONLY.
 
-Role: ${appliedFor}
-Domain: ${domain || 'Software Engineering'}
-Candidate core skills: ${topSkills.slice(0,5).join(', ')||'Not specified'}
+        const prompt = isTech ? `You are a Principal Engineer evaluating a technical interview answer.
+Role: ${appliedFor} | Skills: ${topSkills.slice(0,5).join(', ')||'Software Engineering'}
 
 Question: ${question}
 Answer: ${answer}
 
-Score on 3 technical dimensions:
-
-1. technicalAccuracy (0-100):
-   - Is the answer factually correct? No wrong information?
-   - 90+: Expert-level accuracy, no mistakes
-   - 70-89: Mostly correct, minor gaps acceptable
-   - 50-69: Partially correct, some technical errors
-   - Below 50: Incorrect facts or fundamental misunderstanding
-
-2. technicalDepth (0-100):
-   - Does the answer demonstrate REAL hands-on experience?
-   - 90+: Gives specific examples, mentions edge cases, trade-offs, production experience
-   - 70-89: Good explanation with practical context
-   - 50-69: Surface level, sounds like textbook knowledge
-   - Below 50: Vague, generic, no real depth shown
-
-3. roleRelevance (0-100):
-   - Is this answer relevant to what ${appliedFor} needs?
-   - 90+: Directly addresses the role requirements
-   - 70-89: Mostly on-target
-   - Below 60: Misses the point for this role
-
-IMPORTANT: Do NOT score on communication style, grammar, or enthusiasm.
-Only evaluate technical content.
+Score PURELY on technical merit — not communication style:
+1. technicalAccuracy (0-100): Are facts correct? No wrong information?
+2. technicalDepth (0-100): Real hands-on experience vs textbook knowledge?
+3. roleRelevance (0-100): Does this answer apply to the ${appliedFor} role specifically?
 
 Return ONLY valid JSON:
-{
-  "technicalAccuracy": 75,
-  "technicalDepth": 70,
-  "roleRelevance": 80,
-  "overallScore": 74,
-  "feedback": "One specific technical observation — what was strong or what technical concept was missing/wrong"
-}`;
+{"technicalAccuracy":75,"technicalDepth":70,"roleRelevance":80,"feedback":"One specific technical observation"}`
 
-        const resp = await groq.chat.completions.create({
+: `You are an experienced HR/Functional interviewer evaluating a candidate for a ${appliedFor} role.
+Domain: ${domain || appliedFor} | Key skills: ${topSkills.slice(0,5).join(', ')||appliedFor}
+
+Question: ${question}
+Answer: ${answer}
+
+Score the answer quality for a NON-TECHNICAL role (NOT an IT role):
+1. domainKnowledge (0-100): Does the candidate understand the domain/industry for this role?
+2. communicationClarity (0-100): Is the answer clear, structured, and professional?
+3. problemSolving (0-100): Does the answer show logical thinking and initiative?
+4. roleUnderstanding (0-100): Does the candidate understand what this role requires?
+
+Return ONLY valid JSON:
+{"domainKnowledge":75,"communicationClarity":80,"problemSolving":70,"roleUnderstanding":75,"feedback":"One specific observation about this answer"}`;
+
+        const resp  = await groq.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           messages: [{ role:'user', content:prompt }],
-          temperature: 0.1, max_tokens: 250,
+          temperature: 0.1, max_tokens: 200,
         });
         const text  = resp.choices[0].message.content.replace(/```json|```/g,'').trim();
         const match = text.match(/\{[\s\S]*\}/);
         if (match) {
-          const p  = JSON.parse(match[0]);
-          accuracy  = Math.min(100, Math.max(0, Number(p.technicalAccuracy || 0)));
-          depth     = Math.min(100, Math.max(0, Number(p.technicalDepth    || 0)));
-          relevance = Math.min(100, Math.max(0, Number(p.roleRelevance     || 0)));
-          overall   = Math.round((accuracy * 0.40) + (depth * 0.40) + (relevance * 0.20));
-          feedback  = (p.feedback || '').slice(0, 150);
+          const p = JSON.parse(match[0]);
+          feedback = (p.feedback || '').slice(0, 200);
+
+          if (isTech) {
+            score1 = Math.min(100, Math.max(0, Number(p.technicalAccuracy || 0)));
+            score2 = Math.min(100, Math.max(0, Number(p.technicalDepth    || 0)));
+            score3 = Math.min(100, Math.max(0, Number(p.roleRelevance     || 0)));
+            // Technical: accuracy(40%) + depth(40%) + relevance(20%)
+            overall = Math.round((score1 * 0.40) + (score2 * 0.40) + (score3 * 0.20));
+          } else {
+            score1 = Math.min(100, Math.max(0, Number(p.domainKnowledge      || 0)));
+            score2 = Math.min(100, Math.max(0, Number(p.communicationClarity || 0)));
+            score3 = Math.min(100, Math.max(0, Number(p.problemSolving       || 0)));
+            score4 = Math.min(100, Math.max(0, Number(p.roleUnderstanding    || 0)));
+            // Non-technical: domain(30%) + communication(30%) + problem(20%) + role(20%)
+            overall = Math.round((score1 * 0.30) + (score2 * 0.30) + (score3 * 0.20) + (score4 * 0.20));
+          }
         }
       } catch (e) { console.error('[answer scoring]', e.message); }
     }
 
     totalScore += overall;
     scoredAnswers.push({
-      question:      question.slice(0, 200),
-      aiScore:       overall,
-      scoreBreakdown:{ technical: accuracy, depth, relevance },
-      aiFeedback:    feedback,
+      question:       question.slice(0, 400),
+      aiScore:        overall,
+      scoreBreakdown: isTech
+        ? { technical: score1, depth: score2, relevance: score3 }
+        : { domain: score1, communication: score2, problemSolving: score3, roleUnderstanding: score4 },
+      aiFeedback: feedback,
     });
   }
 
-  const screeningScore = answers.length > 0
-    ? Math.round(totalScore / answers.length)
-    : 0;
-
+  const screeningScore = answers.length > 0 ? Math.round(totalScore / answers.length) : 0;
   return { scoredAnswers, screeningScore };
 }
 
@@ -342,7 +342,7 @@ async function tryGroq(apiKey, model, prompt) {
   const resp = await groq.chat.completions.create({
     model: model||'llama-3.3-70b-versatile',
     messages:[{ role:'user', content:prompt }],
-    temperature: 0.1, max_tokens: 1500,
+    temperature:0.1, max_tokens:1500,
   });
   return parseJSON(resp.choices[0].message.content);
 }
@@ -392,7 +392,7 @@ async function tryHuggingFace(apiKey, model, prompt) {
   });
   const data = await resp.json();
   const text = Array.isArray(data)?data[0]?.generated_text:data.generated_text;
-  if (!text) throw new Error('No response from HuggingFace');
+  if (!text) throw new Error('No HuggingFace response');
   return parseJSON(text);
 }
 

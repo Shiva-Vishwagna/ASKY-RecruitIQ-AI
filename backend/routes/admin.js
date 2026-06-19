@@ -1,108 +1,44 @@
-const express = require('express');
-const router  = express.Router();
-const bcrypt  = require('bcryptjs');
-const { protect, adminOnly } = require('../middleware/auth');
+const mongoose = require('mongoose');
 
-// All routes require admin
-router.use(protect, adminOnly);
+const jobSchema = new mongoose.Schema({
+  title:          { type: String, required: true, trim: true },
+  department:     { type: String, required: true, trim: true },
+  location:       { type: String, default: 'Remote' },
+  description:    { type: String, default: '' },
+  requirements:   [{ type: String }],
+  status:         { type: String, enum: ['open','closed','on-hold'], default: 'open' },
+  createdBy:      { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  candidateCount: { type: Number, default: 0 },
+  questions:      [{ type: String }],
 
-const getUser = () => require('../models/User');
+  // ── Role Type — drives all question & scoring logic ──────
+  // technical: IT/Engineering roles — scores on skills + stability
+  // non_technical: Sales, Travel, HR, Ops, etc — scores on experience relevance + stability
+  roleType: {
+    type:    String,
+    enum:    ['technical', 'non_technical'],
+    default: 'technical',
+  },
 
-// ── GET all users ─────────────────────────────────────────────
-router.get('/users', async (req, res) => {
-  try {
-    const User  = getUser();
-    const users = await User.find().select('-password').sort({ createdAt: -1 });
-    res.json({ users });
-  } catch (err) { res.status(500).json({ message: err.message }); }
-});
+  // Level Engine
+  level:          { type: String, default: 'Mid' },
+  primarySkill:   { type: String, default: '' },
+  requiredSkills: [{ type: String }],
+  minAiScore:     { type: Number, default: 60 },
 
-// ── POST create user ──────────────────────────────────────────
-router.post('/users', async (req, res) => {
-  try {
-    const User = getUser();
-    const { name, email, password, role = 'recruiter', isActive = true } = req.body;
+  // Question Bank
+  questionBank: [{
+    text:       { type: String, maxlength: 400 },
+    difficulty: { type: String, enum: ['easy','medium','hard'], default: 'medium' },
+    category:   { type: String, default: 'General' },
+  }],
 
-    if (!name?.trim())     return res.status(400).json({ message: 'Name is required' });
-    if (!email?.trim())    return res.status(400).json({ message: 'Email is required' });
-    if (!password?.trim()) return res.status(400).json({ message: 'Password is required' });
-    if (password.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' });
+  // Configurable scoring weights (cv% + screening% must = 100)
+  scoringWeights: {
+    cvWeight:        { type: Number, default: 60, min: 0, max: 100 },
+    screeningWeight: { type: Number, default: 40, min: 0, max: 100 },
+  },
 
-    const exists = await User.findOne({ email: email.toLowerCase().trim() });
-    if (exists) return res.status(400).json({ message: `User with email ${email} already exists` });
+}, { timestamps: true });
 
-    const user = await User.create({
-      name:     name.trim(),
-      email:    email.toLowerCase().trim(),
-      password, // model should hash via pre-save hook
-      role:     ['admin','recruiter'].includes(role) ? role : 'recruiter',
-      isActive: !!isActive,
-    });
-
-    const obj = user.toObject();
-    delete obj.password;
-    res.status(201).json({ user: obj, message: `${name} created successfully as ${role}` });
-  } catch (err) {
-    if (err.code === 11000) return res.status(400).json({ message: 'Email already in use' });
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ── PUT update user ───────────────────────────────────────────
-router.put('/users/:id', async (req, res) => {
-  try {
-    const User = getUser();
-    const { name, email, role, isActive, password } = req.body;
-    const update = {};
-
-    if (name     !== undefined) update.name     = name.trim();
-    if (email    !== undefined) update.email    = email.toLowerCase().trim();
-    if (role     !== undefined) update.role     = ['admin','recruiter'].includes(role) ? role : 'recruiter';
-    if (isActive !== undefined) update.isActive = !!isActive;
-
-    // Password reset
-    if (password) {
-      if (password.length < 6) return res.status(400).json({ message: 'Password must be at least 6 characters' });
-      update.password = await bcrypt.hash(password, 10);
-    }
-
-    const user = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select('-password');
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    res.json({ user, message: `${user.name} updated` });
-  } catch (err) {
-    if (err.code === 11000) return res.status(400).json({ message: 'Email already in use' });
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ── DELETE user ───────────────────────────────────────────────
-router.delete('/users/:id', async (req, res) => {
-  try {
-    const User = getUser();
-    // Prevent deleting yourself
-    if (req.params.id === req.user._id.toString()) {
-      return res.status(400).json({ message: 'You cannot delete your own account' });
-    }
-    const user = await User.findByIdAndDelete(req.params.id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    res.json({ message: `${user.name} deleted` });
-  } catch (err) { res.status(500).json({ message: err.message }); }
-});
-
-// ── GET stats ─────────────────────────────────────────────────
-router.get('/stats', async (req, res) => {
-  try {
-    const User      = getUser();
-    const Candidate = require('../models/Candidate');
-    const Job       = require('../models/Job');
-    const [users, candidates, jobs] = await Promise.all([
-      User.countDocuments(),
-      Candidate.countDocuments(),
-      Job.countDocuments(),
-    ]);
-    res.json({ users, candidates, jobs });
-  } catch (err) { res.status(500).json({ message: err.message }); }
-});
-
-module.exports = router;
+module.exports = mongoose.model('Job', jobSchema);

@@ -53,7 +53,7 @@ router.put('/users/:id', async (req, res) => {
   try {
     const User = getUser();
     const { name, email, role, isActive, password } = req.body;
-    const update: any = {};
+    const update = {};
 
     if (name     !== undefined) update.name     = name.trim();
     if (email    !== undefined) update.email    = email.toLowerCase().trim();

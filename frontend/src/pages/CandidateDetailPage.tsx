@@ -8,6 +8,7 @@ interface Session {
   sessionType: "ai_generated"|"bank_questions";
   difficulty?: string;
   conductedAt?: string;
+  conductedBy?: string;
   screeningScore: number;
   screeningBreakdown?: Breakdown;
   answers?: Answer[];

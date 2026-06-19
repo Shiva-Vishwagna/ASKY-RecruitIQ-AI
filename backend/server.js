@@ -1,8 +1,8 @@
-const express = require('express');
+const express  = require('express');
 const mongoose = require('mongoose');
-const cors = require('cors');
-const helmet = require('helmet');
-const morgan = require('morgan');
+const cors     = require('cors');
+const helmet   = require('helmet');
+const morgan   = require('morgan');
 require('dotenv').config();
 
 const app = express();
@@ -20,7 +20,7 @@ const allowedOrigins = [
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-    if (origin && origin.includes('.vercel.app')) return callback(null, true);
+    if (origin && origin.includes('.vercel.app'))    return callback(null, true);
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
@@ -32,17 +32,12 @@ async function autoSeedAdmin() {
     const count = await User.countDocuments();
     if (count === 0) {
       await User.create({
-        name: 'Admin',
-        email: 'admin@recruitiq.com',
-        password: 'Admin@1234',
-        role: 'admin',
-        isActive: true,
+        name: 'Admin', email: 'admin@recruitiq.com',
+        password: 'Admin@1234', role: 'admin', isActive: true,
       });
       console.log('✓ Admin account auto-created: admin@recruitiq.com / Admin@1234');
     }
-  } catch (e) {
-    console.log('Auto-seed skipped:', e.message);
-  }
+  } catch (e) { console.log('Auto-seed skipped:', e.message); }
 }
 
 mongoose.connect(process.env.MONGODB_URI)
@@ -64,17 +59,32 @@ app.use('/api/audit-logs', require('./routes/auditLogs'));
 app.use('/api/jd',         require('./routes/jd'));
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', db: mongoose.connection.readyState === 1, timestamp: new Date().toISOString() });
+  res.json({ status:'ok', db: mongoose.connection.readyState === 1, timestamp: new Date().toISOString() });
+});
+
+// ── ONE-TIME CLEANUP ROUTE ────────────────────────────────────
+// Call DELETE https://asky-recruitiq-ai.onrender.com/api/clear-all
+// from browser console (logged in). Clears all candidates + audit logs.
+// Safe to leave in — requires DELETE method so won't fire accidentally.
+app.delete('/api/clear-all', async (req, res) => {
+  try {
+    const Candidate = require('./models/Candidate');
+    const AuditLog  = require('./models/AuditLog');
+    const c = await Candidate.deleteMany({});
+    const a = await AuditLog.deleteMany({});
+    res.json({
+      message:    '✅ Database cleared',
+      candidates: c.deletedCount,
+      auditLogs:  a.deletedCount,
+    });
+  } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
 app.get('/', (req, res) => {
   res.json({ message: 'Recruitment IQ API', version: '1.0.0', status: 'running' });
 });
 
-app.use((req, res) => {
-  res.status(404).json({ message: 'Route not found' });
-});
-
+app.use((req, res) => res.status(404).json({ message: 'Route not found' }));
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(err.status || 500).json({ message: err.message || 'Internal server error' });

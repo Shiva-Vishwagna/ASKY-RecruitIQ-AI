@@ -1,17 +1,17 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 
 // ── Types ─────────────────────────────────────────────────────
-interface Breakdown { technical?: number; depth?: number; relevance?: number; }
-interface Answer { question: string; aiScore?: number; scoreBreakdown?: Breakdown; aiFeedback?: string; }
-interface Session {
-  sessionType: "ai_generated"|"bank_questions";
-  difficulty?: string;
-  conductedAt?: string;
-  conductedBy?: string;
-  screeningScore: number;
-  screeningBreakdown?: Breakdown;
-  answers?: Answer[];
+interface Breakdown { [key: string]: number }
+interface Answer    { question: string; aiScore?: number; scoreBreakdown?: Breakdown; aiFeedback?: string }
+interface Session   {
+  _id?: string; sessionType: "ai_generated"|"bank_questions";
+  difficulty?: string; conductedAt?: string; conductedBy?: string;
+  screeningScore: number; screeningBreakdown?: Breakdown; answers?: Answer[]
+}
+interface RiskFlags {
+  frequentJobChanges?: boolean; noticePeriodRisk?: string;
+  missingMandatorySkills?: string[]; domainMismatch?: boolean
 }
 interface Candidate {
   _id: string; name: string; email: string; phone?: string;
@@ -21,102 +21,92 @@ interface Candidate {
   aiScore?: number; score?: number;
   cvScoreBreakdown?: { skillsMatchScore?: number; stabilityScore?: number };
   screeningScore?: number; screeningBreakdown?: Breakdown;
-  roleType?: "technical"|"non_technical";
   screeningSessions?: Session[];
   interviewQuestions?: string[];
   screeningAnswers?: Answer[];
-  combinedScore?: number;
-  hmReportType?: string;
-  tier?: string; riskLevel?: string;
-  status?: string;
+  combinedScore?: number; hmReportType?: string;
+  tier?: string; riskLevel?: string; status?: string;
   recommendation?: string; recommendationReason?: string;
   summary?: string; hmSummary?: string;
   strengths?: string[]; gaps?: string[];
   interviewFocusAreas?: string[];
-  riskFlags?: { frequentJobChanges?: boolean; noticePeriodRisk?: string; missingMandatorySkills?: string[]; domainMismatch?: boolean };
+  riskFlags?: RiskFlags;
   skillScores?: { skill: string; score: number }[];
   databases?: string[]; frameworks?: string[]; tools?: string[];
   technicalExperience?: string; leadershipExperience?: string; cloudExpertise?: string;
-  jobId?: any;
+  roleType?: string;
+  jobId?: { roleType?: string; scoringWeights?: { cvWeight: number; screeningWeight: number } };
 }
 
 // ── Constants ─────────────────────────────────────────────────
+const API = "https://asky-recruitiq-ai.onrender.com/api";
 const STAGES = [
-  { value:"cv_uploaded",       label:"CV Uploaded",       color:"bg-gray-100 text-gray-600"      },
+  { value:"cv_uploaded",       label:"CV Uploaded",       color:"bg-gray-100 text-gray-700"      },
   { value:"ai_screened",       label:"AI Screened",       color:"bg-blue-100 text-blue-700"      },
   { value:"questions_sent",    label:"Questions Sent",    color:"bg-purple-100 text-purple-700"  },
   { value:"answers_submitted", label:"Answers Submitted", color:"bg-amber-100 text-amber-700"    },
   { value:"hm_ready",          label:"HM Ready ✓",        color:"bg-emerald-100 text-emerald-700"},
   { value:"rejected",          label:"Rejected",          color:"bg-red-100 text-red-700"        },
 ];
-const REC_STYLE: Record<string,string> = {
-  "Strong Hire": "bg-emerald-100 text-emerald-700 border-emerald-300",
-  "Hire":        "bg-blue-100 text-blue-700 border-blue-300",
-  "Consider":    "bg-amber-100 text-amber-700 border-amber-300",
-  "Weak Fit":    "bg-orange-100 text-orange-700 border-orange-300",
-  "Reject":      "bg-red-100 text-red-700 border-red-300",
+const REC: Record<string,string> = {
+  "Strong Hire":"bg-emerald-100 text-emerald-700 border-emerald-300",
+  "Hire":       "bg-blue-100 text-blue-700 border-blue-300",
+  "Consider":   "bg-amber-100 text-amber-700 border-amber-300",
+  "Weak Fit":   "bg-orange-100 text-orange-700 border-orange-300",
+  "Reject":     "bg-red-100 text-red-700 border-red-300",
 };
-const DIFF_CFG = {
-  easy:  { icon:"🟢", label:"Easy",   color:"bg-emerald-600 text-white", inactive:"bg-emerald-50 text-emerald-700 border border-emerald-200", desc:"0–2 yrs · Core concepts" },
-  medium:{ icon:"🟡", label:"Medium", color:"bg-amber-500 text-white",   inactive:"bg-amber-50 text-amber-700 border border-amber-200",     desc:"3–5 yrs · Real scenarios" },
-  hard:  { icon:"🔴", label:"Hard",   color:"bg-red-600 text-white",     inactive:"bg-red-50 text-red-700 border border-red-200",           desc:"6+ yrs · System design"  },
+const DIFF = {
+  easy:  { icon:"🟢", label:"Easy",   color:"bg-emerald-600 text-white", pale:"bg-emerald-50 text-emerald-800 border border-emerald-200", desc:"0–2 yrs · Core concepts"  },
+  medium:{ icon:"🟡", label:"Medium", color:"bg-amber-500 text-white",   pale:"bg-amber-50 text-amber-800 border border-amber-200",       desc:"3–5 yrs · Real scenarios" },
+  hard:  { icon:"🔴", label:"Hard",   color:"bg-red-600 text-white",     pale:"bg-red-50 text-red-800 border border-red-200",             desc:"6+ yrs · System design"   },
 };
-const API = "https://asky-recruitiq-ai.onrender.com/api";
 
-// ── Helper: Score bar ─────────────────────────────────────────
-function Bar({ label, score, color="bg-blue-500", weight="" }: { label:string; score:number; color?:string; weight?:string; key?:any }) {
+function clr(n: number) { return n>=80?"text-emerald-600":n>=60?"text-blue-600":n>=40?"text-amber-600":"text-red-600"; }
+function bgclr(n: number) { return n>=80?"bg-emerald-500":n>=60?"bg-blue-500":n>=40?"bg-amber-500":"bg-red-500"; }
+
+function Bar({ label, score, weight="" }: { label:string; score:number; weight?:string }) {
   return (
     <div>
       <div className="flex justify-between text-xs mb-1">
         <span className="text-gray-600">{label}{weight && <span className="text-gray-400 ml-1">({weight})</span>}</span>
-        <span className="font-bold text-gray-900">{score}/100</span>
+        <span className={`font-bold ${clr(score)}`}>{score}/100</span>
       </div>
       <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div className={`h-2 rounded-full ${color}`} style={{ width:`${Math.min(score,100)}%` }}/>
+        <div className={`h-2 rounded-full ${bgclr(score)}`} style={{ width:`${Math.min(score,100)}%` }}/>
       </div>
-    </div>
-  );
-}
-
-// ── Helper: Score chip ────────────────────────────────────────
-function ScoreChip({ score, label }: { score:number|null; label:string }) {
-  const n = score ?? 0;
-  const c = n>=80?"bg-emerald-100 text-emerald-700":n>=60?"bg-blue-100 text-blue-700":n>=40?"bg-amber-100 text-amber-700":"bg-red-100 text-red-700";
-  return (
-    <div className="text-center">
-      <div className={`text-3xl font-black ${c.split(' ')[1]}`}>{score ?? "—"}</div>
-      <div className="text-xs text-gray-400 mt-0.5">{label}</div>
     </div>
   );
 }
 
 export default function CandidateDetailPage() {
-  const { id } = useParams();
+  const { id }   = useParams();
   const navigate = useNavigate();
-  const token = localStorage.getItem("token");
+  const token    = localStorage.getItem("token") || "";
 
   const [candidate, setCandidate] = useState<Candidate|null>(null);
   const [loading, setLoading]     = useState(true);
   const [tab, setTab]             = useState("overview");
 
-  // Screening state
-  const [qMode, setQMode]           = useState<"ai"|"bank">("ai");
+  // Question / screening state
+  const [qMode, setQMode]       = useState<"ai"|"bank">("ai");
   const [difficulty, setDifficulty] = useState<"easy"|"medium"|"hard">("medium");
-  const [bankDiff, setBankDiff]     = useState<"all"|"easy"|"medium"|"hard">("all");
-  const [questions, setQuestions]   = useState<string[]>([]);
-  const [answers, setAnswers]       = useState<string[]>([]);
-  const [generatingQ, setGeneratingQ] = useState(false);
-  const [submitting, setSubmitting]   = useState(false);
-  const [screenResult, setScreenResult] = useState<any>(null);
+  const [bankDiff, setBankDiff] = useState<"all"|"easy"|"medium"|"hard">("all");
+  const [questions, setQuestions] = useState<string[]>([]);
+  const [answers, setAnswers]     = useState<string[]>([]);
+  const [genLoading, setGenLoading]   = useState(false);
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [screenResult, setScreenResult]   = useState<any>(null);
+  const [rescreenLoading, setRescreenLoading] = useState(false);
 
-  // HM Report state
-  const [hmMode, setHmMode]     = useState<"cv_only"|"cv_ai_questions"|"cv_bank_questions">("cv_only");
-  const [submittingHM, setSubmittingHM] = useState(false);
-  const [hmResult, setHmResult] = useState<any>(null);
+  // HM report state
+  const [hmMode, setHmMode]       = useState<"cv_only"|"cv_ai_questions"|"cv_bank_questions">("cv_only");
+  const [hmLoading, setHmLoading] = useState(false);
+  const [hmDone, setHmDone]       = useState(false);
 
-  useEffect(() => { fetchCandidate(); }, [id]);
+  useEffect(() => { load(); }, [id]);
 
-  async function fetchCandidate() {
+  async function load() {
+    setLoading(true);
     try {
       const r = await fetch(`${API}/candidates/${id}`, { headers:{ Authorization:`Bearer ${token}` } });
       const d = await r.json();
@@ -128,68 +118,70 @@ export default function CandidateDetailPage() {
 
   async function updateStatus(s: string) {
     await fetch(`${API}/candidates/${id}`, {
-      method:"PATCH", headers:{"Content-Type":"application/json", Authorization:`Bearer ${token}`},
+      method:"PATCH",
+      headers:{"Content-Type":"application/json", Authorization:`Bearer ${token}`},
       body: JSON.stringify({ status:s }),
     });
-    setCandidate(prev => prev ? {...prev, status:s} : prev);
+    setCandidate(p => p ? {...p, status:s} : p);
   }
 
   async function rescreen() {
-    setLoading(true);
+    setRescreenLoading(true);
     try {
       const r = await fetch(`${API}/candidates/${id}/rescreen`, {
         method:"POST", headers:{"Content-Type":"application/json", Authorization:`Bearer ${token}`},
       });
       const d = await r.json();
-      if (r.ok) { setCandidate(prev => prev ? {...prev,...d.candidate} : prev); }
-      else alert(d.message || "Re-screen failed");
-    } finally { setLoading(false); }
+      if (!r.ok) { alert(d.message || "Re-screen failed"); return; }
+      setCandidate(p => p ? {...p, ...d.candidate} : p);
+    } finally { setRescreenLoading(false); }
   }
 
-  async function generateAIQuestions() {
+  async function generateAI() {
     if (!candidate) return;
-    setGeneratingQ(true);
+    setGenLoading(true);
     try {
       const r = await fetch(`${API}/candidates/${id}/questions`, {
         method:"POST",
         headers:{"Content-Type":"application/json", Authorization:`Bearer ${token}`},
         body: JSON.stringify({
-          jobTitle: candidate.appliedFor||candidate.jobTitle,
-          skills:   candidate.topSkills,
+          jobTitle:  candidate.appliedFor || candidate.jobTitle,
+          skills:    candidate.topSkills,
           difficulty,
-          roleType: roleType,
+          roleType:  roleType,
         }),
       });
       const d = await r.json();
-      if (!r.ok) { alert(d.message||"Failed to generate questions"); return; }
+      if (!r.ok) { alert(d.message || "Failed to generate questions"); return; }
       const qs = d.questions || [];
-      setQuestions(qs); setAnswers(new Array(qs.length).fill(""));
-      setCandidate(prev => prev ? {...prev, interviewQuestions:qs, status:"questions_sent"} : prev);
+      setQuestions(qs);
+      setAnswers(new Array(qs.length).fill(""));
+      setCandidate(p => p ? {...p, interviewQuestions:qs, status:"questions_sent"} : p);
       setTab("screening");
-    } catch(e:any) { alert("Error: "+e.message); }
-    finally { setGeneratingQ(false); }
+    } finally { setGenLoading(false); }
   }
 
-  async function loadBankQuestions() {
-    if (!candidate?.jobId) { alert("No job linked to this candidate"); return; }
-    setGeneratingQ(true);
+  async function loadBank() {
+    if (!candidate) return;
+    const jobId = typeof candidate.jobId === "object" ? (candidate.jobId as any)?._id : candidate.jobId;
+    if (!jobId) { alert("No job linked to this candidate"); return; }
+    setGenLoading(true);
     try {
-      const jobId = typeof candidate.jobId === "object" ? candidate.jobId._id : candidate.jobId;
       const url = `${API}/jobs/${jobId}/question-bank/random${bankDiff!=="all"?`?difficulty=${bankDiff}`:""}`;
       const r   = await fetch(url, { headers:{ Authorization:`Bearer ${token}` } });
       const d   = await r.json();
-      if (!r.ok) { alert(d.message||"No questions in bank. Add questions to the Job's Question Bank first."); return; }
+      if (!r.ok) { alert(d.message || "No questions in bank"); return; }
       const qs = d.questions || [];
-      setQuestions(qs); setAnswers(new Array(qs.length).fill(""));
-      setCandidate(prev => prev ? {...prev, interviewQuestions:qs, status:"questions_sent"} : prev);
+      setQuestions(qs);
+      setAnswers(new Array(qs.length).fill(""));
+      setCandidate(p => p ? {...p, interviewQuestions:qs, status:"questions_sent"} : p);
       setTab("screening");
-    } catch(e:any) { alert("Error: "+e.message); }
-    finally { setGeneratingQ(false); }
+    } finally { setGenLoading(false); }
   }
 
   async function submitAnswers() {
-    if (answers.some(a=>!a.trim())) { alert("Please fill in all answers before submitting."); return; }
-    setSubmitting(true);
+    if (answers.some(a => !a.trim())) { alert("Please answer all questions"); return; }
+    setSubmitLoading(true);
     try {
       const payload = questions.map((q,i) => ({ question:q, answer:answers[i] }));
       const r = await fetch(`${API}/candidates/${id}/answers`, {
@@ -199,355 +191,156 @@ export default function CandidateDetailPage() {
       });
       const d = await r.json();
       setScreenResult(d);
-      setCandidate(prev => prev ? {...prev,...d.candidate} : prev);
+      setCandidate(p => p ? {...p, ...d.candidate} : p);
       setTab("hm-report");
-    } catch(e:any) { alert("Error: "+e.message); }
-    finally { setSubmitting(false); }
+    } finally { setSubmitLoading(false); }
   }
 
-  async function submitHMReport() {
-    setSubmittingHM(true);
-    try {
-      // Determine which session to use
-      const sessions = candidate?.screeningSessions || [];
-      const targetType = hmMode==="cv_ai_questions" ? "ai_generated" : "bank_questions";
-      const sessionIndex = hmMode!=="cv_only"
-        ? sessions.filter(s=>s.sessionType===targetType).length - 1
-        : undefined;
+  async function setHMReport() {
+    const sessions   = candidate?.screeningSessions || [];
+    const targetType = hmMode === "cv_ai_questions" ? "ai_generated" : "bank_questions";
+    const sessionIdx = hmMode !== "cv_only"
+      ? sessions.filter(s=>s.sessionType===targetType).length - 1
+      : undefined;
 
+    setHmLoading(true);
+    try {
       const r = await fetch(`${API}/candidates/${id}/hm-report`, {
         method:"POST",
         headers:{"Content-Type":"application/json", Authorization:`Bearer ${token}`},
-        body: JSON.stringify({ reportType:hmMode, sessionIndex }),
+        body: JSON.stringify({ reportType:hmMode, sessionIndex:sessionIdx }),
       });
       const d = await r.json();
-      if (!r.ok) { alert(d.message||"Failed to set HM report"); return; }
-      setHmResult(d);
-      setCandidate(prev => prev ? {...prev, ...d.candidate, hmReportType:hmMode, combinedScore:d.finalScore, recommendation:d.recommendation, status:"hm_ready"} : prev);
-    } catch(e:any) { alert("Error: "+e.message); }
-    finally { setSubmittingHM(false); }
+      if (!r.ok) { alert(d.message || "Failed"); return; }
+      setHmDone(true);
+      setCandidate(p => p ? {...p, ...d.candidate, hmReportType:hmMode, combinedScore:d.finalScore, recommendation:d.recommendation, status:"hm_ready"} : p);
+    } finally { setHmLoading(false); }
   }
 
-  function generateHMScorecard() {
-    if (!candidate) return;
-    const c = candidate;
-    const cvScore     = c.aiScore || c.score || 0;
-    const screenScore = c.screeningScore || 0;
-    const finalScore  = c.combinedScore || cvScore;
-    const rec         = c.recommendation || "Pending";
-    const date        = new Date().toLocaleDateString("en-IN", {day:"2-digit",month:"short",year:"numeric"});
-    const tierKey     = (c.tier || "C-Tier").replace(/-?Tier$/i, "");
-    const reportLabel = c.hmReportType === "cv_only" ? "CV Score Only" : c.hmReportType === "cv_ai_questions" ? "CV + AI Screening" : "CV + Bank Questions";
+  // ── Derived values ─────────────────────────────────────────
+  if (loading) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"/>
+    </div>
+  );
+  if (!candidate) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-500">Candidate not found</div>
+  );
 
-    function sc(n: number): string {
-      return n >= 80 ? "#065f46" : n >= 60 ? "#1e40af" : n >= 40 ? "#92400e" : "#7f1d1d";
-    }
-    function bg(n: number): string {
-      return n >= 80 ? "#d1fae5" : n >= 60 ? "#dbeafe" : n >= 40 ? "#fef3c7" : "#fee2e2";
-    }
-    function bar(n: number, color: string): string {
-      return '<div style="height:8px;background:#e5e7eb;border-radius:4px"><div style="height:8px;width:' + n + '%;background:' + color + ';border-radius:4px"></div></div>';
-    }
-    function scoreRow(label: string, score: number, weight: string): string {
-      return '<tr style="border-bottom:1px solid #f9fafb">'
-        + '<td style="padding:9px 14px;font-size:12px;color:#374151;padding-left:24px">' + label + '</td>'
-        + '<td style="padding:9px 14px;text-align:center;font-weight:700;font-size:14px;color:' + sc(score) + '">' + score + '</td>'
-        + '<td style="padding:9px 14px;text-align:center;font-size:11px;color:#9ca3af">' + weight + '</td>'
-        + '<td style="padding:9px 14px;width:130px">' + bar(score, sc(score)) + '</td>'
-        + '</tr>';
-    }
+  const cvScore    = candidate.aiScore || candidate.score || 0;
+  const screenScore = (candidate.screeningScore && candidate.screeningScore > 0) ? candidate.screeningScore : null;
+  const combined   = screenScore ? (candidate.combinedScore || Math.round(cvScore*0.6 + screenScore*0.4)) : cvScore;
+  const roleType   = candidate.roleType || (candidate.jobId as any)?.roleType || "technical";
+  const isTech     = roleType !== "non_technical";
+  const tierKey    = (candidate.tier || "C-Tier").replace(/-?Tier$/i, "");
+  const TIER_BG    = ({A:"bg-emerald-100 text-emerald-700",B:"bg-blue-100 text-blue-700",C:"bg-amber-100 text-amber-700"} as any)[tierKey] || "bg-gray-100 text-gray-600";
+  const TIER_GRAD  = ({A:"from-emerald-400 to-emerald-600",B:"from-blue-400 to-blue-600",C:"from-amber-400 to-amber-600"} as any)[tierKey] || "from-gray-400 to-gray-600";
+  const rec        = candidate.recommendation || (cvScore>=85?"Strong Hire":cvScore>=72?"Hire":cvScore>=58?"Consider":cvScore>=42?"Weak Fit":"Reject");
+  const curStage   = STAGES.find(s=>s.value===(candidate.status||"cv_uploaded")) || STAGES[0];
+  const sessions   = candidate.screeningSessions || [];
+  const aiSess     = sessions.filter(s=>s.sessionType==="ai_generated");
+  const bankSess   = sessions.filter(s=>s.sessionType==="bank_questions");
+  const hasAI      = aiSess.length > 0;
+  const hasBank    = bankSess.length > 0;
+  const hasInsights = !!(candidate.summary || candidate.hmSummary || (candidate.strengths?.length||0) > 0);
 
-    const recColor = rec === "Strong Hire" ? "#065f46" : rec === "Hire" ? "#1e40af" : rec === "Consider" ? "#92400e" : rec === "Weak Fit" ? "#9a3412" : "#7f1d1d";
-    const recBg    = rec === "Strong Hire" ? "#d1fae5" : rec === "Hire" ? "#dbeafe" : rec === "Consider" ? "#fef3c7" : rec === "Weak Fit" ? "#ffedd5" : "#fee2e2";
-    const tierColor = tierKey === "A" ? "#065f46" : tierKey === "B" ? "#1e40af" : "#92400e";
-    const tierBg    = tierKey === "A" ? "#d1fae5" : tierKey === "B" ? "#dbeafe" : "#fef3c7";
-
-    const riskItems: string[] = [];
-    if (c.riskFlags?.frequentJobChanges) riskItems.push("🔄 Frequent job changes");
-    if (c.riskFlags?.domainMismatch)     riskItems.push("🎯 Domain mismatch");
-    const missingSkills = c.riskFlags?.missingMandatorySkills || [];
-    if (missingSkills.length > 0) riskItems.push("❌ Missing: " + missingSkills.join(", "));
-    if (c.riskFlags?.noticePeriodRisk && c.riskFlags.noticePeriodRisk !== "Not mentioned" && c.riskFlags.noticePeriodRisk !== "")
-      riskItems.push("⏰ " + c.riskFlags.noticePeriodRisk);
-
-    // Build HTML using string concatenation
-    let html = "";
-    html += "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">";
-    html += "<title>HM Report — " + c.name + "</title>";
-    html += "<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,\'Segoe UI\',Arial,sans-serif;background:#f9fafb;color:#111827}@media print{body{background:#fff}.np{display:none}}</style>";
-    html += "</head><body>";
-
-    // Print button
-    html += "<div class=\"np\" style=\"position:fixed;top:16px;right:16px;z-index:99;display:flex;gap:8px\">";
-    html += "<button onclick=\"window.print()\" style=\"background:#1d4ed8;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer\">🖨 Print / Save PDF</button>";
-    html += "<button onclick=\"window.close()\" style=\"background:#fff;color:#374151;border:1px solid #d1d5db;padding:10px 16px;border-radius:8px;font-size:14px;cursor:pointer\">✕ Close</button>";
-    html += "</div>";
-
-    html += "<div style=\"max-width:900px;margin:0 auto;padding:32px 24px\">";
-
-    // Header
-    html += "<div style=\"background:#0f172a;color:#fff;border-radius:16px;padding:32px;margin-bottom:20px\">";
-    html += "<div style=\"display:flex;justify-content:space-between;align-items:flex-start\">";
-    html += "<div>";
-    html += "<div style=\"font-size:10px;letter-spacing:2px;color:#94a3b8;margin-bottom:6px\">HIRING MANAGER REPORT · " + reportLabel.toUpperCase() + "</div>";
-    html += "<h1 style=\"font-size:26px;font-weight:800;margin-bottom:4px\">" + c.name + "</h1>";
-    html += "<div style=\"color:#94a3b8;font-size:13px;margin-bottom:10px\">" + [c.email, c.phone].filter(Boolean).join(" · ") + "</div>";
-    html += "<div style=\"display:flex;gap:8px;flex-wrap:wrap\">";
-    if (c.appliedFor) html += "<span style=\"background:#1e293b;color:#e2e8f0;padding:4px 12px;border-radius:16px;font-size:12px\">💼 " + c.appliedFor + "</span>";
-    if (c.domain)     html += "<span style=\"background:#1e293b;color:#e2e8f0;padding:4px 12px;border-radius:16px;font-size:12px\">🏷️ " + c.domain + "</span>";
-    if (c.experienceYears) html += "<span style=\"background:#1e293b;color:#e2e8f0;padding:4px 12px;border-radius:16px;font-size:12px\">📅 " + c.experienceYears + " yrs</span>";
-    if (c.seniority)  html += "<span style=\"background:#1e293b;color:#e2e8f0;padding:4px 12px;border-radius:16px;font-size:12px\">🎯 " + c.seniority + "</span>";
-    html += "</div></div>";
-    html += "<div style=\"text-align:right\">";
-    html += "<div style=\"font-size:48px;font-weight:900;line-height:1\">" + finalScore + "</div>";
-    html += "<div style=\"color:#94a3b8;font-size:11px;margin-top:2px\">Final Score / 100</div>";
-    html += "<div style=\"margin-top:8px;display:flex;gap:6px;justify-content:flex-end\">";
-    html += "<span style=\"background:" + tierBg + ";color:" + tierColor + ";padding:4px 12px;border-radius:16px;font-size:12px;font-weight:700\">" + tierKey + "-Tier</span>";
-    html += "</div><div style=\"color:#64748b;font-size:10px;margin-top:6px\">" + date + "</div>";
-    html += "</div></div></div>";
-
-    // Recommendation
-    html += "<div style=\"background:" + recBg + ";border:2px solid " + recColor + "30;border-radius:12px;padding:18px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center\">";
-    html += "<div><div style=\"font-size:10px;font-weight:600;color:" + recColor + ";text-transform:uppercase;letter-spacing:1px;margin-bottom:3px\">HIRING RECOMMENDATION</div>";
-    html += "<div style=\"font-size:22px;font-weight:800;color:" + recColor + "\">" + rec + "</div></div>";
-    if (c.recommendationReason) html += "<div style=\"font-size:13px;color:#374151;max-width:55%;line-height:1.6\">" + c.recommendationReason + "</div>";
-    html += "</div>";
-
-    // Score cards
-    html += "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px\">";
-    html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;text-align:center\">";
-    html += "<div style=\"font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px\">📄 CV Score</div>";
-    html += "<div style=\"font-size:36px;font-weight:900;color:" + sc(cvScore) + "\">" + cvScore + "</div>";
-    html += "<div style=\"font-size:10px;color:#9ca3af;margin-top:2px\">Skills 70% + Stability 30%</div></div>";
-    html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;text-align:center\">";
-    html += "<div style=\"font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px\">🎙️ Screening</div>";
-    html += "<div style=\"font-size:36px;font-weight:900;color:" + (screenScore ? sc(screenScore) : "#d1d5db") + "\">" + (screenScore || "—") + "</div>";
-    html += "<div style=\"font-size:10px;color:#9ca3af;margin-top:2px\">" + (c.hmReportType === "cv_only" ? "Not included" : "Technical Interview") + "</div></div>";
-    html += "<div style=\"background:#0f172a;border-radius:12px;padding:18px;text-align:center\">";
-    html += "<div style=\"font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px\">🏆 Final Score</div>";
-    html += "<div style=\"font-size:36px;font-weight:900;color:#fff\">" + finalScore + "</div>";
-    html += "<div style=\"font-size:10px;color:#64748b;margin-top:2px\">" + (c.hmReportType === "cv_only" ? "CV Score Only" : "CV 60% + Screen 40%") + "</div></div>";
-    html += "</div>";
-
-    // Score breakdown table
-    html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:20px\">";
-    html += "<div style=\"padding:14px 18px;background:#f9fafb;border-bottom:1px solid #f3f4f6\"><div style=\"font-size:13px;font-weight:700;color:#111827\">📊 Score Breakdown</div></div>";
-    html += "<table style=\"width:100%;border-collapse:collapse\">";
-    html += "<thead><tr style=\"background:#f9fafb\">";
-    html += "<th style=\"padding:8px 14px;text-align:left;font-size:11px;color:#6b7280\">Parameter</th>";
-    html += "<th style=\"padding:8px 14px;text-align:center;font-size:11px;color:#6b7280\">Score</th>";
-    html += "<th style=\"padding:8px 14px;text-align:center;font-size:11px;color:#6b7280\">Weight</th>";
-    html += "<th style=\"padding:8px 14px;font-size:11px;color:#6b7280\">Visual</th>";
-    html += "</tr></thead><tbody>";
-    html += "<tr style=\"background:#eff6ff\"><td colspan=\"4\" style=\"padding:7px 14px;font-size:11px;font-weight:700;color:#1d4ed8\">📄 RESUME MATCH (" + cvScore + "/100)</td></tr>";
-    html += scoreRow("Skills Match & Technical Depth", c.cvScoreBreakdown?.skillsMatchScore || 0, "70%");
-    html += scoreRow("Stability & Reliability", c.cvScoreBreakdown?.stabilityScore || 0, "30%");
-    if (c.hmReportType !== "cv_only") {
-      html += "<tr style=\"background:#f5f3ff\"><td colspan=\"4\" style=\"padding:7px 14px;font-size:11px;font-weight:700;color:#7c3aed\">🎙️ TECHNICAL SCREENING (" + screenScore + "/100)</td></tr>";
-      html += scoreRow("Technical Accuracy", c.screeningBreakdown?.technical || 0, "40%");
-      html += scoreRow("Technical Depth",    c.screeningBreakdown?.depth     || 0, "40%");
-      html += scoreRow("Role Relevance",     c.screeningBreakdown?.relevance || 0, "20%");
-    }
-    html += "<tr style=\"background:#0f172a\">";
-    html += "<td style=\"padding:12px 14px;font-size:13px;font-weight:800;color:#fff\">🏆 FINAL SCORE</td>";
-    html += "<td style=\"padding:12px 14px;text-align:center;font-size:20px;font-weight:900;color:#fff\">" + finalScore + "</td>";
-    html += "<td style=\"padding:12px 14px;text-align:center;font-size:11px;color:#64748b\">" + (c.hmReportType === "cv_only" ? "100%" : "60%+40%") + "</td>";
-    html += "<td style=\"padding:12px 14px\"><span style=\"background:" + recBg + ";color:" + recColor + ";padding:3px 12px;border-radius:10px;font-size:11px;font-weight:700\">" + rec + "</span></td>";
-    html += "</tr></tbody></table></div>";
-
-    // HM Summary
-    if (c.hmSummary || c.summary) {
-      html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:20px\">";
-      html += "<div style=\"font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px\">🎯 Hiring Manager Briefing</div>";
-      html += "<p style=\"font-size:13px;color:#374151;line-height:1.75\">" + (c.hmSummary || c.summary) + "</p></div>";
-    }
-
-    // Strengths & Gaps
-    const hasStrengths = (c.strengths?.length || 0) > 0;
-    const hasGaps      = (c.gaps?.length      || 0) > 0;
-    if (hasStrengths || hasGaps) {
-      html += "<div style=\"display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px\">";
-      if (hasStrengths) {
-        html += "<div style=\"background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:18px\">";
-        html += "<div style=\"font-size:12px;font-weight:700;color:#065f46;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px\">✅ STRENGTHS</div>";
-        c.strengths!.forEach(s => { html += "<div style=\"font-size:12px;color:#374151;margin-bottom:6px;padding-left:10px;border-left:3px solid #22c55e\">" + s + "</div>"; });
-        html += "</div>";
-      }
-      if (hasGaps) {
-        html += "<div style=\"background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:18px\">";
-        html += "<div style=\"font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px\">⚠️ CONCERNS</div>";
-        c.gaps!.forEach(g => { html += "<div style=\"font-size:12px;color:#374151;margin-bottom:6px;padding-left:10px;border-left:3px solid #f59e0b\">" + g + "</div>"; });
-        html += "</div>";
-      }
-      html += "</div>";
-    }
-
-    // Interview Focus Areas
-    if ((c.interviewFocusAreas?.length || 0) > 0) {
-      html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:20px\">";
-      html += "<div style=\"font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px\">🎯 HM Interview Focus Areas</div>";
-      c.interviewFocusAreas!.forEach((a, i) => {
-        html += "<div style=\"display:flex;gap:10px;margin-bottom:8px;align-items:flex-start\">";
-        html += "<span style=\"min-width:22px;height:22px;background:#0f172a;color:#fff;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700\">" + (i + 1) + "</span>";
-        html += "<p style=\"font-size:12px;color:#374151;line-height:1.5\">" + a + "</p></div>";
-      });
-      html += "</div>";
-    }
-
-    // Risk Flags
-    if (riskItems.length > 0) {
-      html += "<div style=\"background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:18px;margin-bottom:20px\">";
-      html += "<div style=\"font-size:12px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px\">⚠️ RISK FLAGS</div>";
-      riskItems.forEach(r => { html += "<div style=\"font-size:12px;color:#7f1d1d;margin-bottom:5px\">" + r + "</div>"; });
-      html += "</div>";
-    }
-
-    // Screening Q&A
-    if (c.hmReportType !== "cv_only" && (c.screeningAnswers?.length || 0) > 0) {
-      html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin-bottom:20px\">";
-      html += "<div style=\"padding:14px 18px;background:#f9fafb;border-bottom:1px solid #f3f4f6\"><div style=\"font-size:13px;font-weight:700;color:#111827\">🎙️ Technical Screening Q&A</div></div>";
-      c.screeningAnswers!.forEach((a, i) => {
-        html += "<div style=\"padding:14px 18px;border-bottom:1px solid #f9fafb\">";
-        html += "<div style=\"display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px\">";
-        html += "<div style=\"font-size:12px;font-weight:600;color:#374151;flex:1\">Q" + (i + 1) + ": " + (a.question || "") + "</div>";
-        if (a.aiScore != null) {
-          html += "<span style=\"background:" + bg(a.aiScore || 0) + ";color:" + sc(a.aiScore || 0) + ";padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;margin-left:10px\">" + a.aiScore + "/100</span>";
-        }
-        html += "</div>";
-        if (a.aiFeedback) html += "<div style=\"font-size:11px;color:#6b7280;font-style:italic\">💡 " + a.aiFeedback + "</div>";
-        html += "</div>";
-      });
-      html += "</div>";
-    }
-
-    // Tech Stack
-    const hasDbs  = (c.databases?.length  || 0) > 0;
-    const hasFws  = (c.frameworks?.length  || 0) > 0;
-    const hasTools = (c.tools?.length      || 0) > 0;
-    if (hasDbs || hasFws || hasTools) {
-      html += "<div style=\"background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:20px\">";
-      html += "<div style=\"font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px\">💻 Tech Stack</div>";
-      html += "<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:12px\">";
-      if (hasDbs) {
-        html += "<div><div style=\"font-size:10px;color:#6b7280;font-weight:600;margin-bottom:6px\">🗄️ DATABASES</div><div style=\"display:flex;flex-wrap:wrap;gap:5px\">";
-        c.databases!.forEach(d => { html += "<span style=\"background:#fff7ed;color:#c2410c;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid #fed7aa\">" + d + "</span>"; });
-        html += "</div></div>";
-      }
-      if (hasFws) {
-        html += "<div><div style=\"font-size:10px;color:#6b7280;font-weight:600;margin-bottom:6px\">⚙️ FRAMEWORKS</div><div style=\"display:flex;flex-wrap:wrap;gap:5px\">";
-        c.frameworks!.forEach(f => { html += "<span style=\"background:#f5f3ff;color:#6d28d9;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid #ddd6fe\">" + f + "</span>"; });
-        html += "</div></div>";
-      }
-      if (hasTools) {
-        html += "<div><div style=\"font-size:10px;color:#6b7280;font-weight:600;margin-bottom:6px\">🛠️ TOOLS</div><div style=\"display:flex;flex-wrap:wrap;gap:5px\">";
-        c.tools!.forEach(t => { html += "<span style=\"background:#f9fafb;color:#374151;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid #e5e7eb\">" + t + "</span>"; });
-        html += "</div></div>";
-      }
-      html += "</div></div>";
-    }
-
-    // Footer
-    html += "<div style=\"border-top:1px solid #e5e7eb;padding-top:14px;display:flex;justify-content:space-between\">";
-    html += "<div style=\"font-size:10px;color:#9ca3af\">Generated by ASKY RecruitIQ · " + date + "</div>";
-    html += "<div style=\"font-size:10px;color:#9ca3af\">Confidential — Internal Use Only</div>";
-    html += "</div></div></body></html>";
-
-    const w = window.open("", "_blank", "width=1000,height=800");
-    if (w) { w.document.write(html); w.document.close(); }
-  }
-
-
-  if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"/></div>;
-  if (!candidate) return <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-500">Candidate not found</div>;
-
-  const cvScore      = candidate.aiScore || candidate.score || 0;
-  const roleType     = candidate.roleType || (candidate.jobId?.roleType) || "technical";
-  const isTech       = roleType !== "non_technical";
-  const rawScreen    = candidate.screeningScore;
-  const screenScore  = (rawScreen && rawScreen > 0) ? rawScreen : null;
-  const combined     = (candidate.combinedScore && candidate.combinedScore > 0 && screenScore)
-    ? candidate.combinedScore
-    : cvScore;
-  const tierKey      = (candidate.tier||"C-Tier").replace(/-?Tier$/i,"");
-  const tierColor    = ({A:"from-emerald-400 to-emerald-600",B:"from-blue-400 to-blue-600",C:"from-amber-400 to-amber-600"} as any)[tierKey]||"from-gray-400 to-gray-600";
-  const rec          = candidate.recommendation || (cvScore>=85?"Strong Hire":cvScore>=72?"Hire":cvScore>=58?"Consider":cvScore>=42?"Weak Fit":"Reject");
-  const curStage     = STAGES.find(s=>s.value===(candidate.status||"cv_uploaded"))||STAGES[0];
-  const hasScreening = screenScore !== null && screenScore > 0;
-  const hasSessions  = (candidate.screeningSessions||[]).length > 0;
-  const aiSessions   = (candidate.screeningSessions||[]).filter(s=>s.sessionType==="ai_generated");
-  const bankSessions = (candidate.screeningSessions||[]).filter(s=>s.sessionType==="bank_questions");
+  // score breakdown labels by role type
+  const cvLabel1 = isTech ? "Skills Match & Technical Depth" : "Experience Relevance to Role";
+  const cvW1     = isTech ? "70%" : "60%";
+  const cvW2     = isTech ? "30%" : "40%";
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* ── Header ── */}
+
+      {/* ── HEADER ── */}
       <div className="bg-white border-b border-gray-100 px-6 py-4">
-        <button onClick={() => navigate("/candidates")} className="text-gray-500 hover:text-blue-600 text-sm mb-3 flex items-center gap-1">← Back to Candidates</button>
-        <div className="flex items-start gap-5">
-          <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${tierColor} flex items-center justify-center text-white text-xl font-bold shadow`}>
+        <button onClick={()=>navigate("/candidates")} className="text-sm text-gray-500 hover:text-blue-600 mb-3 flex items-center gap-1">← Candidates</button>
+
+        <div className="flex items-start gap-4">
+          {/* Avatar */}
+          <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${TIER_GRAD} flex items-center justify-center text-white text-xl font-bold shadow shrink-0`}>
             {candidate.name?.charAt(0)?.toUpperCase()}
           </div>
-          <div className="flex-1">
+
+          {/* Name + info */}
+          <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-bold text-gray-900">{candidate.name}</h1>
-            <div className="flex gap-4 text-sm text-gray-500 mt-0.5 flex-wrap">
-              <span>✉️ {candidate.email}</span>
+            <div className="flex flex-wrap gap-3 text-sm text-gray-500 mt-0.5">
+              {candidate.email && <span>✉️ {candidate.email}</span>}
               {candidate.phone && <span>📞 {candidate.phone}</span>}
-              <span>💼 <strong className="text-gray-700">{candidate.appliedFor||candidate.jobTitle||"—"}</strong></span>
+              {(candidate.appliedFor||candidate.jobTitle) && <span>💼 <strong className="text-gray-800">{candidate.appliedFor||candidate.jobTitle}</strong></span>}
               {candidate.seniority && <span>🎯 {candidate.seniority}</span>}
-              {candidate.experienceYears ? <span>📅 {candidate.experienceYears}y</span> : null}
+              {candidate.experienceYears ? <span>📅 {candidate.experienceYears}y exp</span> : null}
+              {candidate.domain && <span>🏷️ {candidate.domain}</span>}
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${TIER_BG}`}>{tierKey}-Tier</span>
+              <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${REC[rec]||"bg-gray-100 text-gray-600 border-gray-200"}`}>{rec}</span>
+              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${isTech?"bg-blue-100 text-blue-700":"bg-amber-100 text-amber-700"}`}>
+                {isTech?"💻 Technical":"🤝 Non-Technical"}
+              </span>
             </div>
           </div>
-          {/* Score display */}
-          <div className="flex items-center gap-4 shrink-0">
-            <ScoreChip score={cvScore} label="CV Score"/>
-            {hasScreening && screenScore !== null ? (
+
+          {/* Score + actions */}
+          <div className="flex items-center gap-3 shrink-0">
+            {/* CV Score */}
+            <div className="text-center">
+              <div className={`text-4xl font-black ${cvScore>0?clr(cvScore):"text-red-400"}`}>{cvScore||"—"}</div>
+              <div className="text-xs text-gray-400 mt-0.5">CV Score</div>
+            </div>
+
+            {screenScore && (
               <>
-                <span className="text-gray-300 text-lg">+</span>
-                <ScoreChip score={screenScore} label="Screening"/>
-                <span className="text-gray-300 text-lg">=</span>
+                <span className="text-gray-300 text-xl">+</span>
+                <div className="text-center">
+                  <div className={`text-4xl font-black ${clr(screenScore)}`}>{screenScore}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">Screening</div>
+                </div>
+                <span className="text-gray-300 text-xl">=</span>
                 <div className="text-center bg-slate-800 rounded-xl px-4 py-2">
-                  <div className="text-3xl font-black text-white">{combined}</div>
-                  <div className="text-xs text-gray-400">Combined</div>
+                  <div className="text-4xl font-black text-white">{combined}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">Combined</div>
                 </div>
               </>
-            ) : (
-              <div className="text-center bg-amber-50 border border-amber-200 rounded-xl px-4 py-2">
-                <div className="text-xs font-semibold text-amber-600">Screening pending</div>
-                <div className="text-xs text-amber-400 mt-0.5">Generate questions →</div>
+            )}
+
+            {!screenScore && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-center">
+                <div className="text-xs font-semibold text-amber-700">Screening pending</div>
+                <button onClick={()=>setTab("generate")} className="text-xs text-amber-600 underline mt-0.5">Generate questions →</button>
               </div>
             )}
           </div>
-          {/* Actions */}
-          <div className="flex flex-col gap-2 items-end shrink-0">
-            <div className="flex gap-2">
-              <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${({A:"bg-emerald-100 text-emerald-700",B:"bg-blue-100 text-blue-700",C:"bg-amber-100 text-amber-700"} as any)[tierKey]||"bg-gray-100 text-gray-600"}`}>{tierKey}-Tier</span>
-              <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${REC_STYLE[rec]||"bg-gray-100 text-gray-600 border-gray-200"}`}>{rec}</span>
-            </div>
+
+          {/* Buttons */}
+          <div className="flex flex-col gap-2 shrink-0 items-end">
             <select value={candidate.status||"cv_uploaded"} onChange={e=>updateStatus(e.target.value)}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-lg focus:ring-2 focus:ring-blue-500 cursor-pointer border-0 ${curStage.color}`}>
+              className={`text-xs font-semibold px-3 py-1.5 rounded-lg border-0 cursor-pointer focus:ring-2 focus:ring-blue-500 ${curStage.color}`}>
               {STAGES.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
-            <div className="flex gap-2 flex-wrap">
-              <button onClick={rescreen}
-                className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-all ${cvScore===0?"bg-red-600 text-white hover:bg-red-700 animate-pulse":"bg-blue-600 text-white hover:bg-blue-700"}`}>
-                🔄 {cvScore===0?"Run AI Screening":"Re-screen CV"}
+            <div className="flex gap-2">
+              <button onClick={rescreen} disabled={rescreenLoading}
+                className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-all ${cvScore===0?"bg-red-600 text-white hover:bg-red-700":"bg-blue-600 text-white hover:bg-blue-700"} disabled:opacity-60`}>
+                {rescreenLoading ? "⏳..." : cvScore===0 ? "🔄 Run AI Screening" : "🔄 Re-screen"}
               </button>
               {candidate.status==="hm_ready" && (
-                <button onClick={generateHMScorecard} className="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-slate-700">📋 HM Report</button>
+                <button onClick={()=>setTab("hm-report")} className="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-slate-700">📋 HM Report</button>
               )}
             </div>
             {cvScore===0 && (
-              <div className="text-xs text-red-500 font-medium mt-1">⚠️ CV Score = 0. Check GROQ_API_KEY in Render → Environment</div>
+              <div className="text-xs text-red-500 font-medium">⚠️ Add GROQ_API_KEY in Render → Environment</div>
             )}
           </div>
         </div>
 
         {/* Risk flags */}
         {(candidate.riskFlags?.frequentJobChanges || (candidate.riskFlags?.missingMandatorySkills||[]).length>0 || candidate.riskFlags?.domainMismatch) && (
-          <div className="mt-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex gap-3 flex-wrap">
-            <span className="text-sm font-bold text-red-700">⚠️ Risk Flags:</span>
-            {candidate.riskFlags?.frequentJobChanges && <span className="text-xs bg-red-100 text-red-700 px-2.5 py-1 rounded-full font-semibold">🔄 Frequent job changes</span>}
-            {candidate.riskFlags?.domainMismatch     && <span className="text-xs bg-orange-100 text-orange-700 px-2.5 py-1 rounded-full font-semibold">🎯 Domain mismatch</span>}
-            {(candidate.riskFlags?.missingMandatorySkills||[]).map(s=><span key={s} className="text-xs bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full font-semibold">Missing: {s}</span>)}
+          <div className="mt-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+            <span className="text-xs font-bold text-red-700 mr-3">⚠️ Risk Flags:</span>
+            {candidate.riskFlags?.frequentJobChanges && <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full font-semibold mr-2">🔄 Frequent job changes</span>}
+            {candidate.riskFlags?.domainMismatch     && <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-semibold mr-2">🎯 Domain mismatch</span>}
+            {(candidate.riskFlags?.missingMandatorySkills||[]).map(s=><span key={s} className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full font-semibold mr-2">Missing: {s}</span>)}
           </div>
         )}
 
@@ -555,642 +348,501 @@ export default function CandidateDetailPage() {
         <div className="mt-3 flex gap-1">
           {STAGES.map((s,i)=>{
             const ci = STAGES.findIndex(st=>st.value===(candidate.status||"cv_uploaded"));
-            return <div key={s.value} className="flex-1"><div className={`h-1.5 rounded-full ${i<=ci?"bg-blue-500":"bg-gray-200"}`}/></div>;
+            return <div key={s.value} className="flex-1 flex flex-col items-center gap-1">
+              <div className={`h-1.5 w-full rounded-full ${i<=ci?"bg-blue-500":"bg-gray-200"}`}/>
+            </div>;
           })}
         </div>
       </div>
 
-      {/* ── Tabs ── */}
+      {/* ── TABS ── */}
       <div className="bg-white border-b border-gray-100 px-6">
-        <div className="flex gap-6 overflow-x-auto">
+        <div className="flex gap-5 overflow-x-auto">
           {[
-            { key:"overview",   label:"Overview"                                                          },
-            { key:"score",      label:"Score Breakdown"                                                   },
-            { key:"ai-insights",label:"AI Insights"                                                       },
-            { key:"generate",   label:"Generate Questions"                                                },
-            { key:"screening",  label:`Screening${questions.length>0?` (${questions.length}Q)`:""}`      },
-            { key:"sessions",   label:`Sessions${hasSessions?` (${(candidate.screeningSessions||[]).length})`:""}`},
-            { key:"hm-report",  label:`📋 HM Report${candidate.status==="hm_ready"?" ✓":""}`             },
+            { key:"overview",    label:"Overview"                                               },
+            { key:"score",       label:"Score Breakdown"                                        },
+            { key:"ai-insights", label:"AI Insights" + (!hasInsights?" ⚠️":"")                 },
+            { key:"generate",    label:"Generate Questions"                                     },
+            { key:"screening",   label:`Screening${questions.length>0?` (${questions.length}Q)`:""}`},
+            { key:"sessions",    label:`Sessions${sessions.length>0?` (${sessions.length})`:""}`},
+            { key:"hm-report",   label:`📋 HM Report${candidate.status==="hm_ready"?" ✓":""}` },
           ].map(t=>(
             <button key={t.key} onClick={()=>setTab(t.key)}
-              className={`py-3 px-1 text-sm font-semibold border-b-2 whitespace-nowrap transition-all ${tab===t.key?"border-blue-600 text-blue-600":"border-transparent text-gray-500 hover:text-gray-700"}`}>
+              className={`py-3 text-sm font-semibold border-b-2 whitespace-nowrap transition-all shrink-0 ${tab===t.key?"border-blue-600 text-blue-600":"border-transparent text-gray-500 hover:text-gray-700"}`}>
               {t.label}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="p-6 max-w-5xl">
+      {/* ── TAB CONTENT ── */}
+      <div className="p-6 max-w-5xl space-y-5">
 
-        {/* ── OVERVIEW ── */}
+        {/* OVERVIEW */}
         {tab==="overview" && (
-          <div className="space-y-5">
+          <>
+            {/* Score cards */}
             <div className="bg-white rounded-2xl p-6 border border-gray-100">
-              <h2 className="font-bold text-gray-900 mb-5">Candidate Fit Score</h2>
-              <div className="grid grid-cols-3 gap-4 mb-5">
-                {/* CV Score — always shown */}
+              <h2 className="font-bold text-gray-900 mb-4">Candidate Fit Score</h2>
+              <div className="grid grid-cols-3 gap-4 mb-4">
                 <div className="text-center bg-blue-50 rounded-2xl p-5 border border-blue-100">
-                  <div className="text-4xl font-black text-blue-600">{cvScore}</div>
+                  <div className={`text-4xl font-black ${cvScore>0?clr(cvScore):"text-red-400"}`}>{cvScore||"—"}</div>
                   <div className="text-sm font-bold text-blue-700 mt-1">CV / Resume</div>
-                  <div className="text-xs text-blue-400 mt-0.5">Skills 70% + Stability 30%</div>
+                  <div className="text-xs text-gray-400 mt-0.5">{isTech?"Skills 70% + Stability 30%":"Experience 60% + Stability 40%"}</div>
                 </div>
-                {/* Screening Score — show pending state if not done */}
-                <div className={`text-center rounded-2xl p-5 border ${hasScreening?"bg-purple-50 border-purple-100":"bg-amber-50 border-amber-200"}`}>
-                  {hasScreening ? (
+                <div className={`text-center rounded-2xl p-5 border ${screenScore?"bg-purple-50 border-purple-100":"bg-amber-50 border-amber-200"}`}>
+                  {screenScore ? (
                     <>
-                      <div className="text-4xl font-black text-purple-600">{screenScore}</div>
-                      <div className="text-sm font-bold text-purple-700 mt-1">Technical Screening</div>
-                      <div className="text-xs text-purple-400 mt-0.5">Accuracy 40% + Depth 40% + Fit 20%</div>
+                      <div className={`text-4xl font-black ${clr(screenScore)}`}>{screenScore}</div>
+                      <div className="text-sm font-bold text-purple-700 mt-1">Screening Score</div>
+                      <div className="text-xs text-gray-400 mt-0.5">{isTech?"Technical interview":"Functional interview"}</div>
                     </>
                   ) : (
                     <>
                       <div className="text-3xl text-amber-300 mt-1">⏳</div>
                       <div className="text-sm font-bold text-amber-600 mt-1">Screening Pending</div>
-                      <div className="text-xs text-amber-400 mt-0.5">Go to "Generate Questions" tab</div>
+                      <div className="text-xs text-amber-400 mt-0.5">Go to Generate Questions tab</div>
                     </>
                   )}
                 </div>
-                {/* Combined / Final Score */}
-                <div className={`text-center rounded-2xl p-5 ${hasScreening?"bg-slate-800":"bg-slate-100 border border-slate-200"}`}>
-                  <div className={`text-4xl font-black ${hasScreening?"text-white":"text-slate-400"}`}>{combined}</div>
-                  <div className={`text-sm font-bold mt-1 ${hasScreening?"text-gray-300":"text-slate-500"}`}>
-                    {hasScreening?"Final Score":"CV Score Only"}
-                  </div>
-                  <div className={`text-xs mt-0.5 ${hasScreening?"text-gray-500":"text-slate-400"}`}>
-                    {hasScreening?"CV 60% + Screen 40%":"Score updates after screening"}
-                  </div>
+                <div className={`text-center rounded-2xl p-5 ${screenScore?"bg-slate-800":"bg-slate-100 border border-slate-200"}`}>
+                  <div className={`text-4xl font-black ${screenScore?"text-white":"text-slate-400"}`}>{combined}</div>
+                  <div className={`text-sm font-bold mt-1 ${screenScore?"text-gray-300":"text-slate-500"}`}>{screenScore?"Final Score":"CV Score Only"}</div>
+                  <div className={`text-xs mt-0.5 ${screenScore?"text-gray-500":"text-slate-400"}`}>{screenScore?"CV 60% + Screen 40%":"Complete screening to update"}</div>
                 </div>
               </div>
-              <div className={`rounded-xl p-4 border text-center ${REC_STYLE[rec]||"bg-gray-50 border-gray-100"}`}>
+              <div className={`rounded-xl p-4 border text-center ${REC[rec]||"bg-gray-50 border-gray-100"}`}>
                 <div className="text-xs font-bold uppercase tracking-wide opacity-60 mb-1">
-                  {hasScreening ? "Fit Recommendation (CV + Screening)" : "Fit Recommendation (CV Only — screening pending)"}
+                  {screenScore?"Fit Recommendation (CV + Screening)":"Fit Recommendation (CV Only)"}
                 </div>
                 <div className="text-xl font-black">{rec}</div>
               </div>
             </div>
 
+            {/* Info grid */}
+            <div className="bg-white rounded-2xl p-5 border border-gray-100">
+              <h3 className="font-bold text-gray-900 mb-3">Profile</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                {[
+                  {l:"Domain",    v:candidate.domain},
+                  {l:"Seniority", v:candidate.seniority},
+                  {l:"Experience",v:candidate.experienceYears?`${candidate.experienceYears} years`:undefined},
+                  {l:"Applied For",v:candidate.appliedFor||candidate.jobTitle},
+                ].map(({l,v})=>v ? (
+                  <div key={l}><span className="text-xs text-gray-400 uppercase font-bold">{l}</span><p className="font-semibold text-gray-800 mt-0.5">{v}</p></div>
+                ) : null)}
+              </div>
+            </div>
+
+            {/* HM Summary */}
             {(candidate.hmSummary||candidate.summary) && (
-              <div className="bg-white rounded-2xl p-6 border border-gray-100">
-                <h2 className="font-bold text-gray-900 mb-3">🎯 Hiring Manager Briefing</h2>
-                <p className="text-gray-600 leading-relaxed">{candidate.hmSummary||candidate.summary}</p>
+              <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                <h3 className="font-bold text-gray-900 mb-2">🎯 Hiring Manager Briefing</h3>
+                <p className="text-gray-600 text-sm leading-relaxed">{candidate.hmSummary||candidate.summary}</p>
               </div>
             )}
 
+            {/* Skills */}
             {(candidate.topSkills?.length||0)>0 && (
               <div className="bg-white rounded-2xl p-5 border border-gray-100">
-                <h3 className="font-bold text-gray-900 mb-3">Top Skills</h3>
+                <h3 className="font-bold text-gray-900 mb-3">Key Skills</h3>
                 <div className="flex flex-wrap gap-2">
                   {candidate.topSkills!.map(s=><span key={s} className="bg-blue-50 text-blue-700 text-sm font-medium px-3 py-1 rounded-full border border-blue-100">{s}</span>)}
                 </div>
               </div>
             )}
-          </div>
+          </>
         )}
 
-        {/* ── SCORE BREAKDOWN ── */}
+        {/* SCORE BREAKDOWN */}
         {tab==="score" && (
-          <div className="space-y-5">
+          <>
             <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-              <div className="px-5 py-4 border-b border-gray-50 bg-gray-50">
-                <h2 className="font-bold text-gray-900">Transparent Score Breakdown</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Exactly how the score is calculated</p>
+              <div className="px-5 py-4 bg-gray-50 border-b border-gray-100">
+                <h2 className="font-bold text-gray-900">Score Breakdown</h2>
+                <p className="text-xs text-gray-400 mt-0.5">How the final score is calculated</p>
               </div>
               <table className="w-full">
-                <thead className="bg-gray-50">
+                <thead className="bg-gray-50 border-b border-gray-100">
                   <tr>
-                    <th className="px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase">Parameter</th>
-                    <th className="px-5 py-3 text-center text-xs font-bold text-gray-500 uppercase">Score</th>
-                    <th className="px-5 py-3 text-center text-xs font-bold text-gray-500 uppercase">Weight</th>
-                    <th className="px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase">Visual</th>
+                    {["Parameter","Score","Weight",""].map(h=><th key={h} className="px-5 py-3 text-left text-xs font-bold text-gray-500 uppercase">{h}</th>)}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  <tr className="bg-blue-50"><td className="px-5 py-3 font-bold text-blue-700 text-sm" colSpan={4}>📄 Resume Match ({cvScore}/100)</td></tr>
+                  <tr className="bg-blue-50"><td className="px-5 py-2.5 font-bold text-blue-700 text-xs uppercase" colSpan={4}>📄 Resume Match ({cvScore}/100)</td></tr>
                   {[
-                    {label: isTech ? "Skills Match & Technical Depth" : "Experience Relevance to Role", score:candidate.cvScoreBreakdown?.skillsMatchScore||0, weight: isTech?"70%":"60%", color:"bg-blue-500"},
-                    {label:"Stability & Reliability", score:candidate.cvScoreBreakdown?.stabilityScore||0, weight: isTech?"30%":"40%", color:"bg-indigo-500"},
+                    { label:cvLabel1, score:candidate.cvScoreBreakdown?.skillsMatchScore||0, weight:cvW1, color:"bg-blue-500" },
+                    { label:"Stability & Reliability", score:candidate.cvScoreBreakdown?.stabilityScore||0, weight:cvW2, color:"bg-indigo-500" },
                   ].map(r=>(
                     <tr key={r.label} className="hover:bg-gray-50">
                       <td className="px-5 py-3 text-sm text-gray-700 pl-9">{r.label}</td>
-                      <td className="px-5 py-3 text-center font-bold text-gray-900">{r.score}</td>
+                      <td className={`px-5 py-3 text-center font-bold ${clr(r.score)}`}>{r.score}</td>
                       <td className="px-5 py-3 text-center text-xs text-gray-400">{r.weight}</td>
                       <td className="px-5 py-3"><div className="w-24 h-2 bg-gray-100 rounded-full"><div className={`h-2 rounded-full ${r.color}`} style={{width:`${r.score}%`}}/></div></td>
                     </tr>
                   ))}
-                  {hasScreening && screenScore !== null ? (
+
+                  {screenScore ? (
                     <>
-                      <tr className="bg-purple-50"><td className="px-5 py-3 font-bold text-purple-700 text-sm" colSpan={4}>
-                        {isTech ? "🎙️ Technical Screening" : "🎙️ Functional Screening"} ({screenScore}/100)
-                      </td></tr>
-                      {(isTech ? [
-                        {label:"Technical Accuracy",score:candidate.screeningBreakdown?.technical||0,    weight:"40%",color:"bg-purple-500"},
-                        {label:"Technical Depth",   score:candidate.screeningBreakdown?.depth||0,        weight:"40%",color:"bg-violet-500"},
-                        {label:"Role Relevance",    score:candidate.screeningBreakdown?.relevance||0,    weight:"20%",color:"bg-fuchsia-500"},
-                      ] : [
-                        {label:"Domain Knowledge",      score:(candidate.screeningBreakdown as any)?.domain||0,             weight:"30%",color:"bg-purple-500"},
-                        {label:"Communication & Clarity",score:(candidate.screeningBreakdown as any)?.communication||0,     weight:"30%",color:"bg-violet-500"},
-                        {label:"Problem Solving",        score:(candidate.screeningBreakdown as any)?.problemSolving||0,    weight:"20%",color:"bg-fuchsia-500"},
-                        {label:"Role Understanding",     score:(candidate.screeningBreakdown as any)?.roleUnderstanding||0, weight:"20%",color:"bg-pink-500"},
-                      ]).map(r=>(
-                        <tr key={r.label} className="hover:bg-gray-50">
-                          <td className="px-5 py-3 text-sm text-gray-700 pl-9">{r.label}</td>
-                          <td className="px-5 py-3 text-center font-bold text-gray-900">{r.score}</td>
-                          <td className="px-5 py-3 text-center text-xs text-gray-400">{r.weight}</td>
-                          <td className="px-5 py-3"><div className="w-24 h-2 bg-gray-100 rounded-full"><div className={`h-2 rounded-full ${r.color}`} style={{width:`${r.score}%`}}/></div></td>
-                        </tr>
-                      ))}
+                      <tr className="bg-purple-50"><td className="px-5 py-2.5 font-bold text-purple-700 text-xs uppercase" colSpan={4}>🎙️ {isTech?"Technical":"Functional"} Screening ({screenScore}/100)</td></tr>
+                      {Object.entries(candidate.screeningBreakdown || {}).map(([k,v])=>{ const score=Number(v)||0; return (
+                        <tr key={k} className="hover:bg-gray-50">
+                          <td className="px-5 py-3 text-sm text-gray-700 pl-9 capitalize">{k.replace(/([A-Z])/g,' $1').trim()}</td>
+                          <td className={`px-5 py-3 text-center font-bold ${clr(score)}`}>{score}</td>
+                          <td className="px-5 py-3 text-center text-xs text-gray-400">—</td>
+                          <td className="px-5 py-3"><div className="w-24 h-2 bg-gray-100 rounded-full"><div className="h-2 rounded-full bg-purple-500" style={{width:`${score}%`}}/></div></td>
+                        </tr>); })}
                     </>
                   ) : (
-                    <tr className="bg-amber-50">
-                      <td className="px-5 py-4 text-sm text-amber-700 font-semibold pl-5" colSpan={4}>
-                        ⏳ Technical Screening not completed — go to "Generate Questions" tab to screen this candidate
-                      </td>
-                    </tr>
+                    <tr className="bg-amber-50"><td className="px-5 py-4 text-amber-700 text-sm font-semibold pl-5" colSpan={4}>⏳ Screening not completed yet — generate questions to start screening</td></tr>
                   )}
+
                   <tr className="bg-slate-800">
-                    <td className="px-5 py-4 font-black text-white">🏆 {hasScreening ? "Final Combined Score" : "CV Score (Screening Pending)"}</td>
-                    <td className="px-5 py-4 text-center text-2xl font-black text-white">{combined}</td>
-                    <td className="px-5 py-4 text-center text-xs text-gray-400">{hasScreening?"CV 60% + Screen 40%":"CV Only"}</td>
-                    <td className="px-5 py-4"><span className={`text-xs font-bold px-3 py-1 rounded-full border ${REC_STYLE[rec]||""}`}>{rec}</span></td>
+                    <td className="px-5 py-4 font-black text-white">{screenScore?"🏆 Final Combined Score":"🏆 CV Score (Screening Pending)"}</td>
+                    <td className={`px-5 py-4 text-center text-2xl font-black text-white`}>{combined}</td>
+                    <td className="px-5 py-4 text-center text-xs text-gray-400">{screenScore?"60%+40%":"CV Only"}</td>
+                    <td className="px-5 py-4"><span className={`text-xs font-bold px-3 py-1 rounded-full border ${REC[rec]||""}`}>{rec}</span></td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            {(candidate.skillScores?.length||0)>0 && (
-              <div className="bg-white rounded-2xl p-6 border border-gray-100">
-                <h3 className="font-bold text-gray-900 mb-4">Skill Proficiency</h3>
-                <div className="space-y-3">
-                  {candidate.skillScores!.map(({skill,score:s})=>(
-                    <Bar key={skill} label={skill} score={s} color={s>=80?"bg-emerald-500":s>=60?"bg-blue-500":"bg-amber-500"}/>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── AI INSIGHTS ── */}
-        {tab==="ai-insights" && (
-          <div className="space-y-5">
-
-            {/* Empty state — show if no AI data */}
-            {!(candidate.summary||candidate.hmSummary||candidate.strengths?.length||candidate.gaps?.length||candidate.interviewFocusAreas?.length) && (
-              <div className="bg-white rounded-2xl p-10 border border-gray-100 text-center">
-                <div className="text-5xl mb-4">🤖</div>
-                <p className="font-bold text-gray-700 mb-2">No AI Insights Yet</p>
-                <p className="text-sm text-gray-500 mb-4">Click "🔄 Re-screen CV" to run AI analysis on this candidate</p>
-                <button onClick={rescreen}
-                  className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700">
-                  🔄 Re-screen CV Now
-                </button>
-              </div>
-            )}
-
-            {/* HM Summary */}
-            {(candidate.hmSummary||candidate.summary) && (
-              <div className="bg-white rounded-2xl p-6 border border-gray-100">
-                <h3 className="font-bold text-gray-900 mb-3">🎯 Hiring Manager Briefing</h3>
-                <p className="text-gray-600 leading-relaxed text-sm">{candidate.hmSummary||candidate.summary}</p>
-              </div>
-            )}
-
-            {/* Strengths & Gaps */}
-            {((candidate.strengths?.length||0)+(candidate.gaps?.length||0))>0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {(candidate.strengths?.length||0)>0 && (
-                  <div className="bg-emerald-50 rounded-2xl p-5 border border-emerald-100">
-                    <h3 className="font-bold text-emerald-800 mb-3">✅ Strengths</h3>
-                    <ul className="space-y-2">
-                      {candidate.strengths!.map((s,i)=>(
-                        <li key={i} className="text-sm text-gray-700 flex gap-2 items-start">
-                          <span className="text-emerald-500 shrink-0 mt-0.5">•</span>{s}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {(candidate.gaps?.length||0)>0 && (
-                  <div className="bg-amber-50 rounded-2xl p-5 border border-amber-100">
-                    <h3 className="font-bold text-amber-800 mb-3">⚠️ Concerns / Gaps</h3>
-                    <ul className="space-y-2">
-                      {candidate.gaps!.map((g,i)=>(
-                        <li key={i} className="text-sm text-gray-700 flex gap-2 items-start">
-                          <span className="text-amber-500 shrink-0 mt-0.5">•</span>{g}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* HM Interview Focus Areas */}
-            {(candidate.interviewFocusAreas?.length||0)>0 && (
-              <div className="bg-white rounded-2xl p-5 border border-gray-100">
-                <h3 className="font-bold text-gray-900 mb-4">🎯 Suggested HM Interview Focus Areas</h3>
-                <div className="space-y-3">
-                  {candidate.interviewFocusAreas!.map((a,i)=>(
-                    <div key={i} className="flex gap-3 items-start">
-                      <span className="w-7 h-7 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold shrink-0">{i+1}</span>
-                      <p className="text-sm text-gray-700 pt-0.5">{a}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Experience breakdown */}
-            {(candidate.technicalExperience||candidate.leadershipExperience||candidate.cloudExpertise) && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {candidate.technicalExperience && (
-                  <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-                    <div className="text-blue-700 text-xs font-bold uppercase tracking-wide mb-2">🔧 {isTech?"Technical":"Domain"} Experience</div>
-                    <p className="text-gray-700 text-sm leading-relaxed">{candidate.technicalExperience}</p>
-                  </div>
-                )}
-                {candidate.leadershipExperience && candidate.leadershipExperience !== "None mentioned" && (
-                  <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
-                    <div className="text-purple-700 text-xs font-bold uppercase tracking-wide mb-2">👥 Leadership</div>
-                    <p className="text-gray-700 text-sm leading-relaxed">{candidate.leadershipExperience}</p>
-                  </div>
-                )}
-                {candidate.cloudExpertise && candidate.cloudExpertise !== "None mentioned" && (
-                  <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-100">
-                    <div className="text-emerald-700 text-xs font-bold uppercase tracking-wide mb-2">☁️ Cloud / Tools</div>
-                    <p className="text-gray-700 text-sm leading-relaxed">{candidate.cloudExpertise}</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Risk flags */}
-            {(candidate.riskFlags?.frequentJobChanges || (candidate.riskFlags?.missingMandatorySkills||[]).length>0 || candidate.riskFlags?.domainMismatch) && (
-              <div className="bg-red-50 rounded-2xl p-5 border border-red-200">
-                <h3 className="font-bold text-red-800 mb-3">⚠️ Risk Flags Detected</h3>
-                <div className="flex flex-wrap gap-2">
-                  {candidate.riskFlags?.frequentJobChanges && <span className="bg-red-100 text-red-700 text-xs font-semibold px-3 py-1.5 rounded-full">🔄 Frequent job changes</span>}
-                  {candidate.riskFlags?.domainMismatch     && <span className="bg-orange-100 text-orange-700 text-xs font-semibold px-3 py-1.5 rounded-full">🎯 Domain mismatch</span>}
-                  {(candidate.riskFlags?.missingMandatorySkills||[]).map(s=><span key={s} className="bg-amber-100 text-amber-700 text-xs font-semibold px-3 py-1.5 rounded-full">Missing: {s}</span>)}
-                </div>
-              </div>
-            )}
 
             {/* Skill scores */}
             {(candidate.skillScores?.length||0)>0 && (
               <div className="bg-white rounded-2xl p-5 border border-gray-100">
-                <h3 className="font-bold text-gray-900 mb-4">📊 Skill Proficiency</h3>
+                <h3 className="font-bold text-gray-900 mb-4">Skill Proficiency</h3>
                 <div className="space-y-3">
-                  {candidate.skillScores!.map(({skill,score:s})=>(
-                    <Bar key={skill} label={skill} score={s}
-                      color={s>=80?"bg-emerald-500":s>=60?"bg-blue-500":"bg-amber-500"}/>
-                  ))}
+                  {candidate.skillScores!.map(({skill,score:s})=><Bar key={skill} label={skill} score={s}/>)}
                 </div>
               </div>
             )}
-
-            {/* Tech stack */}
-            {((candidate.databases?.length||0)+(candidate.frameworks?.length||0)+(candidate.tools?.length||0))>0 && (
-              <div className="bg-white rounded-2xl p-5 border border-gray-100">
-                <h3 className="font-bold text-gray-900 mb-4">💻 {isTech?"Tech Stack":"Tools & Systems"}</h3>
-                <div className="grid grid-cols-3 gap-4">
-                  {(candidate.databases?.length||0)>0 && <div><div className="text-xs font-bold text-gray-400 uppercase mb-2">🗄️ Databases</div><div className="flex flex-wrap gap-1.5">{candidate.databases!.map(d=><span key={d} className="bg-orange-50 text-orange-700 text-xs px-2.5 py-1 rounded-full border border-orange-100">{d}</span>)}</div></div>}
-                  {(candidate.frameworks?.length||0)>0 && <div><div className="text-xs font-bold text-gray-400 uppercase mb-2">⚙️ Frameworks</div><div className="flex flex-wrap gap-1.5">{candidate.frameworks!.map(f=><span key={f} className="bg-violet-50 text-violet-700 text-xs px-2.5 py-1 rounded-full border border-violet-100">{f}</span>)}</div></div>}
-                  {(candidate.tools?.length||0)>0 && <div><div className="text-xs font-bold text-gray-400 uppercase mb-2">🛠️ Tools</div><div className="flex flex-wrap gap-1.5">{candidate.tools!.map(t=><span key={t} className="bg-gray-100 text-gray-700 text-xs px-2.5 py-1 rounded-full">{t}</span>)}</div></div>}
-                </div>
-              </div>
-            )}
-
-          </div>
+          </>
         )}
 
-        {/* ── GENERATE QUESTIONS ── */}
-        {tab==="generate" && (
-          <div className="space-y-5">
-            <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <h2 className="font-bold text-gray-900 text-lg mb-4">Generate Interview Questions</h2>
+        {/* AI INSIGHTS */}
+        {tab==="ai-insights" && (
+          <>
+            {!hasInsights ? (
+              <div className="bg-white rounded-2xl p-12 border border-gray-100 text-center">
+                <div className="text-5xl mb-4">🤖</div>
+                <p className="font-bold text-gray-700 text-lg mb-2">No AI Insights Yet</p>
+                <p className="text-sm text-gray-500 mb-6">Click "Re-screen CV" to run AI analysis and generate insights</p>
+                <button onClick={rescreen} disabled={rescreenLoading}
+                  className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-60">
+                  {rescreenLoading?"⏳ Running AI...":"🔄 Run AI Screening Now"}
+                </button>
+              </div>
+            ) : (
+              <>
+                {(candidate.hmSummary||candidate.summary) && (
+                  <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                    <h3 className="font-bold text-gray-900 mb-3">🎯 Hiring Manager Briefing</h3>
+                    <p className="text-gray-600 text-sm leading-relaxed">{candidate.hmSummary||candidate.summary}</p>
+                    {candidate.recommendationReason && <p className="text-xs text-gray-400 mt-3 italic">{candidate.recommendationReason}</p>}
+                  </div>
+                )}
 
-              {/* Role Type Badge */}
-              <div className={`mb-4 flex items-center gap-3 px-4 py-3 rounded-xl ${isTech?"bg-blue-50 border border-blue-100":"bg-amber-50 border border-amber-100"}`}>
-                <span className="text-lg">{isTech ? "💻" : "🤝"}</span>
-                <div>
-                  <p className={`text-sm font-bold ${isTech?"text-blue-800":"text-amber-800"}`}>
-                    {isTech ? "Technical Role" : "Non-Technical Role"}
+                {((candidate.strengths?.length||0)+(candidate.gaps?.length||0))>0 && (
+                  <div className="grid grid-cols-2 gap-4">
+                    {(candidate.strengths?.length||0)>0 && (
+                      <div className="bg-emerald-50 rounded-2xl p-5 border border-emerald-100">
+                        <h3 className="font-bold text-emerald-800 mb-3">✅ Strengths</h3>
+                        <ul className="space-y-2">{candidate.strengths!.map((s,i)=><li key={i} className="text-sm text-gray-700 flex gap-2 items-start"><span className="text-emerald-500 shrink-0">•</span>{s}</li>)}</ul>
+                      </div>
+                    )}
+                    {(candidate.gaps?.length||0)>0 && (
+                      <div className="bg-amber-50 rounded-2xl p-5 border border-amber-100">
+                        <h3 className="font-bold text-amber-800 mb-3">⚠️ Concerns / Gaps</h3>
+                        <ul className="space-y-2">{candidate.gaps!.map((g,i)=><li key={i} className="text-sm text-gray-700 flex gap-2 items-start"><span className="text-amber-500 shrink-0">•</span>{g}</li>)}</ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {(candidate.interviewFocusAreas?.length||0)>0 && (
+                  <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                    <h3 className="font-bold text-gray-900 mb-4">🎯 HM Interview Focus Areas</h3>
+                    <div className="space-y-3">
+                      {candidate.interviewFocusAreas!.map((a,i)=>(
+                        <div key={i} className="flex gap-3 items-start">
+                          <span className="w-6 h-6 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold shrink-0">{i+1}</span>
+                          <p className="text-sm text-gray-700">{a}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(candidate.technicalExperience||candidate.leadershipExperience||candidate.cloudExpertise) && (
+                  <div className="grid grid-cols-3 gap-4">
+                    {candidate.technicalExperience && <div className="bg-blue-50 rounded-xl p-4 border border-blue-100"><div className="text-xs font-bold text-blue-700 uppercase mb-2">🔧 {isTech?"Technical":"Domain"} Experience</div><p className="text-sm text-gray-700 leading-relaxed">{candidate.technicalExperience}</p></div>}
+                    {candidate.leadershipExperience && candidate.leadershipExperience!=="None mentioned" && <div className="bg-purple-50 rounded-xl p-4 border border-purple-100"><div className="text-xs font-bold text-purple-700 uppercase mb-2">👥 Leadership</div><p className="text-sm text-gray-700 leading-relaxed">{candidate.leadershipExperience}</p></div>}
+                    {candidate.cloudExpertise && candidate.cloudExpertise!=="None mentioned" && <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-100"><div className="text-xs font-bold text-emerald-700 uppercase mb-2">☁️ Cloud / Tools</div><p className="text-sm text-gray-700 leading-relaxed">{candidate.cloudExpertise}</p></div>}
+                  </div>
+                )}
+
+                {((candidate.databases?.length||0)+(candidate.frameworks?.length||0)+(candidate.tools?.length||0))>0 && (
+                  <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                    <h3 className="font-bold text-gray-900 mb-4">💻 {isTech?"Tech Stack":"Tools & Systems"}</h3>
+                    <div className="grid grid-cols-3 gap-4">
+                      {(candidate.databases?.length||0)>0 && <div><div className="text-xs font-bold text-gray-400 uppercase mb-2">🗄️ Databases</div><div className="flex flex-wrap gap-1.5">{candidate.databases!.map(d=><span key={d} className="bg-orange-50 text-orange-700 text-xs px-2.5 py-1 rounded-full border border-orange-100">{d}</span>)}</div></div>}
+                      {(candidate.frameworks?.length||0)>0 && <div><div className="text-xs font-bold text-gray-400 uppercase mb-2">⚙️ Frameworks</div><div className="flex flex-wrap gap-1.5">{candidate.frameworks!.map(f=><span key={f} className="bg-violet-50 text-violet-700 text-xs px-2.5 py-1 rounded-full border border-violet-100">{f}</span>)}</div></div>}
+                      {(candidate.tools?.length||0)>0 && <div><div className="text-xs font-bold text-gray-400 uppercase mb-2">🛠️ Tools</div><div className="flex flex-wrap gap-1.5">{candidate.tools!.map(t=><span key={t} className="bg-gray-100 text-gray-700 text-xs px-2.5 py-1 rounded-full">{t}</span>)}</div></div>}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+
+        {/* GENERATE QUESTIONS */}
+        {tab==="generate" && (
+          <div className="bg-white rounded-2xl p-6 border border-gray-100">
+            <h2 className="font-bold text-gray-900 text-lg mb-4">Generate Interview Questions</h2>
+
+            {/* Role type badge */}
+            <div className={`mb-5 flex items-center gap-3 px-4 py-3 rounded-xl ${isTech?"bg-blue-50 border border-blue-100":"bg-amber-50 border border-amber-100"}`}>
+              <span className="text-xl">{isTech?"💻":"🤝"}</span>
+              <div>
+                <p className={`text-sm font-bold ${isTech?"text-blue-800":"text-amber-800"}`}>{isTech?"Technical Role":"Non-Technical Role"}</p>
+                <p className={`text-xs ${isTech?"text-blue-600":"text-amber-600"}`}>
+                  {isTech?"Questions: technical skills, system design, debugging":"Questions: domain knowledge, scenarios, communication, judgment"}
+                </p>
+              </div>
+            </div>
+
+            {/* Mode toggle */}
+            <div className="bg-gray-100 rounded-2xl p-1.5 flex gap-1 mb-5">
+              {(["ai","bank"] as const).map(m=>(
+                <button key={m} onClick={()=>setQMode(m)}
+                  className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${qMode===m?(m==="ai"?"bg-blue-600 text-white":"bg-purple-600 text-white"):"text-gray-600 hover:text-gray-900"}`}>
+                  {m==="ai"?"🤖 AI Generated":"📋 From Job Bank"}
+                </button>
+              ))}
+            </div>
+
+            {/* AI mode */}
+            {qMode==="ai" && (
+              <div className="space-y-4">
+                <div className={`rounded-xl p-4 border ${isTech?"bg-blue-50 border-blue-100":"bg-amber-50 border-amber-100"}`}>
+                  <p className={`text-sm font-bold mb-1 ${isTech?"text-blue-900":"text-amber-900"}`}>
+                    AI generates 8 {isTech?"technical":"role-specific"} questions
                   </p>
                   <p className={`text-xs ${isTech?"text-blue-600":"text-amber-600"}`}>
-                    {isTech
-                      ? "Questions will focus on technical skills, system design, and coding knowledge"
-                      : "Questions will focus on domain knowledge, communication, judgment, and role fit"}
+                    {isTech?`Skills: ${(candidate.topSkills||[]).slice(0,3).join(", ")||"General"}`:`Domain: ${candidate.domain||candidate.appliedFor||"General"}`}
                   </p>
                 </div>
-              </div>
-
-              {/* Mode Toggle */}
-              <div className="bg-gray-100 rounded-2xl p-1.5 flex gap-1 mb-5">
-                <button onClick={()=>setQMode("ai")}
-                  className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${qMode==="ai"?"bg-blue-600 text-white shadow-sm":"text-gray-600"}`}>
-                  🤖 AI Generated
-                </button>
-                <button onClick={()=>setQMode("bank")}
-                  className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${qMode==="bank"?"bg-purple-600 text-white shadow-sm":"text-gray-600"}`}>
-                  📋 From Job Bank
-                </button>
-              </div>
-
-              {/* AI Mode */}
-              {qMode==="ai" && (
-                <div className="space-y-4">
-                  <div className={`rounded-xl p-4 border ${isTech?"bg-blue-50 border-blue-100":"bg-amber-50 border-amber-100"}`}>
-                    <p className={`text-sm font-bold mb-1 ${isTech?"text-blue-900":"text-amber-900"}`}>
-                      {isTech ? "🤖 AI generates 8 technical questions" : "🤖 AI generates 8 role-specific questions"}
-                    </p>
-                    <p className={`text-xs ${isTech?"text-blue-600":"text-amber-600"}`}>
-                      {isTech
-                        ? `Based on skills: ${(candidate.topSkills||[]).slice(0,3).join(", ")||"General"}`
-                        : `Based on domain: ${candidate.domain||candidate.appliedFor||"General"} — scenario & behavioral questions`}
-                    </p>
+                <div>
+                  <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Difficulty Level</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    {(Object.entries(DIFF) as [keyof typeof DIFF, typeof DIFF["easy"]][]).map(([k,d])=>(
+                      <button key={k} onClick={()=>setDifficulty(k)}
+                        className={`p-4 rounded-xl text-left transition-all ${difficulty===k?d.color:d.pale}`}>
+                        <div className="text-lg mb-1">{d.icon}</div>
+                        <div className="font-bold text-sm">{d.label}</div>
+                        <div className="text-xs opacity-70 mt-0.5">{d.desc}</div>
+                      </button>
+                    ))}
                   </div>
-                  <div>
-                    <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Difficulty Level</p>
-                    <div className="grid grid-cols-3 gap-3">
-                      {(Object.entries(DIFF_CFG) as [keyof typeof DIFF_CFG, typeof DIFF_CFG["easy"]][]).map(([key,cfg])=>(
-                        <button key={key} onClick={()=>setDifficulty(key)}
-                          className={`p-4 rounded-xl text-left transition-all ${difficulty===key?cfg.color:cfg.inactive}`}>
-                          <div className="text-lg mb-1">{cfg.icon}</div>
-                          <div className="font-bold text-sm">{cfg.label}</div>
-                          <div className="text-xs mt-0.5 opacity-70">{cfg.desc}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <button onClick={generateAIQuestions} disabled={generatingQ}
-                    className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-60">
-                    {generatingQ?"⏳ Generating...":"✨ Generate Technical Questions"}
-                  </button>
                 </div>
-              )}
+                <button onClick={generateAI} disabled={genLoading}
+                  className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-60">
+                  {genLoading?"⏳ Generating...":"✨ Generate Questions"}
+                </button>
+              </div>
+            )}
 
-              {/* Bank Mode */}
-              {qMode==="bank" && (
-                <div className="space-y-4">
-                  <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
-                    <p className="text-sm font-bold text-purple-900 mb-1">📋 Pick 8 random questions from job's Question Bank</p>
-                    <p className="text-xs text-purple-600">Questions are shuffled and picked randomly each time</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Filter by Difficulty (optional)</p>
-                    <div className="flex gap-2">
-                      {(["all","easy","medium","hard"] as const).map(d=>(
-                        <button key={d} onClick={()=>setBankDiff(d)}
-                          className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all capitalize ${bankDiff===d?"bg-purple-600 text-white border-purple-600":"border-gray-200 text-gray-600"}`}>
-                          {d==="all"?"All":d==="easy"?"🟢 Easy":d==="medium"?"🟡 Med":"🔴 Hard"}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <button onClick={loadBankQuestions} disabled={generatingQ}
-                    className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 disabled:opacity-60">
-                    {generatingQ?"⏳ Loading...":"🎲 Pick 8 Random from Bank"}
-                  </button>
+            {/* Bank mode */}
+            {qMode==="bank" && (
+              <div className="space-y-4">
+                <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
+                  <p className="text-sm font-bold text-purple-900 mb-1">📋 8 random questions from the job's question bank</p>
+                  <p className="text-xs text-purple-600">Shuffled and picked randomly each time</p>
                 </div>
-              )}
-            </div>
+                <div>
+                  <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Filter by difficulty (optional)</p>
+                  <div className="flex gap-2">
+                    {(["all","easy","medium","hard"] as const).map(d=>(
+                      <button key={d} onClick={()=>setBankDiff(d)}
+                        className={`flex-1 py-2 rounded-xl text-xs font-bold border capitalize transition-all ${bankDiff===d?"bg-purple-600 text-white border-purple-600":"border-gray-200 text-gray-600 hover:border-purple-300"}`}>
+                        {d==="easy"?"🟢 Easy":d==="medium"?"🟡 Med":d==="hard"?"🔴 Hard":"All"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button onClick={loadBank} disabled={genLoading}
+                  className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 disabled:opacity-60">
+                  {genLoading?"⏳ Loading...":"🎲 Pick 8 Random Questions"}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
-        {/* ── SCREENING ── */}
+        {/* SCREENING */}
         {tab==="screening" && (
           <div className="space-y-4">
             {questions.length===0 ? (
               <div className="bg-white rounded-2xl p-10 border border-gray-100 text-center">
-                <div className="text-5xl mb-4">❓</div>
-                <p className="font-semibold text-gray-700 mb-4">No questions generated yet</p>
-                <button onClick={()=>setTab("generate")} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold">✨ Go to Generate Questions</button>
+                <div className="text-4xl mb-3">❓</div>
+                <p className="font-bold text-gray-700 mb-4">No questions yet</p>
+                <button onClick={()=>setTab("generate")} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold">✨ Generate Questions First</button>
+              </div>
+            ) : screenResult ? (
+              <div className="bg-emerald-50 rounded-2xl p-5 border border-emerald-200">
+                <p className="font-bold text-emerald-800 text-lg">✅ Screening Complete!</p>
+                <p className="text-sm text-emerald-700 mt-1">Screening Score: <strong>{screenResult.screeningScore}/100</strong> · Combined: <strong>{screenResult.combinedScore}/100</strong> · {screenResult.recommendation}</p>
+                <button onClick={()=>setTab("hm-report")} className="mt-3 bg-emerald-700 text-white px-5 py-2 rounded-xl text-sm font-bold">📋 Set HM Report →</button>
               </div>
             ) : (
               <>
-                <div className={`rounded-xl p-4 border text-sm font-medium ${qMode==="ai"?"bg-blue-50 border-blue-100 text-blue-700":"bg-purple-50 border-purple-100 text-purple-700"}`}>
-                  {qMode==="ai"?`🤖 AI-Generated ${DIFF_CFG[difficulty]?.icon} ${DIFF_CFG[difficulty]?.label} Questions`:"📋 Job Bank Questions"} · {questions.length} questions
+                <div className={`rounded-xl p-3 border text-sm font-semibold ${qMode==="ai"?"bg-blue-50 border-blue-100 text-blue-700":"bg-purple-50 border-purple-100 text-purple-700"}`}>
+                  {qMode==="ai"?`🤖 AI Questions — ${DIFF[difficulty].icon} ${DIFF[difficulty].label}`:"📋 Job Bank Questions"} · {questions.length}Q
                 </div>
-                <div className="bg-amber-50 rounded-xl p-4 border border-amber-100 text-sm text-amber-700">
-                  <strong>Instructions:</strong> Record the candidate's verbal answers below. AI will score each answer technically.
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-sm text-amber-700">
+                  <strong>Recruiter:</strong> Ask each question. Record the candidate's answer. AI will score each response.
                 </div>
                 {questions.map((q,i)=>(
                   <div key={i} className="bg-white rounded-xl p-5 border border-gray-100">
                     <div className="flex gap-3 mb-3">
-                      <span className="bg-blue-100 text-blue-700 font-bold text-xs w-7 h-7 rounded-full flex items-center justify-center shrink-0">{i+1}</span>
-                      <p className="text-gray-800 text-sm font-medium leading-relaxed">{q}</p>
+                      <span className="w-7 h-7 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold shrink-0">{i+1}</span>
+                      <p className="text-sm font-medium text-gray-800 leading-relaxed">{q}</p>
                     </div>
                     <textarea value={answers[i]||""} onChange={e=>{const a=[...answers];a[i]=e.target.value;setAnswers(a);}}
-                      rows={3} placeholder="Type candidate's answer here..."
-                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"/>
+                      rows={3} placeholder="Record candidate's answer here..."
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"/>
                   </div>
                 ))}
-                {screenResult ? (
-                  <div className="bg-emerald-50 rounded-xl p-5 border border-emerald-200">
-                    <p className="font-bold text-emerald-700">✅ Screening complete! Screening Score: {screenResult.screeningScore}/100</p>
-                    <p className="text-sm text-emerald-600 mt-1">Combined Score: {screenResult.combinedScore}/100 · {screenResult.recommendation}</p>
-                    <button onClick={()=>setTab("hm-report")} className="mt-3 bg-emerald-700 text-white px-5 py-2 rounded-xl text-sm font-bold hover:bg-emerald-800">
-                      📋 Set HM Report →
-                    </button>
-                  </div>
-                ) : (
-                  <button onClick={submitAnswers} disabled={submitting||answers.filter(a=>a.trim()).length<questions.length}
-                    className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-60">
-                    {submitting?"⏳ AI scoring answers...":  `🚀 Submit ${questions.length} Answers`}
-                  </button>
-                )}
+                <button onClick={submitAnswers} disabled={submitLoading||answers.filter(a=>a.trim()).length<questions.length}
+                  className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-60">
+                  {submitLoading?"⏳ AI scoring...":"🚀 Submit Answers for AI Scoring"}
+                </button>
               </>
             )}
           </div>
         )}
 
-        {/* ── SESSIONS ── */}
+        {/* SESSIONS */}
         {tab==="sessions" && (
           <div className="space-y-4">
-            <h2 className="font-bold text-gray-900 text-lg">Screening Sessions History</h2>
-            {!hasSessions ? (
+            <h2 className="font-bold text-gray-900">Screening History</h2>
+            {sessions.length===0 ? (
               <div className="bg-white rounded-2xl p-10 border border-gray-100 text-center text-gray-400">
-                <div className="text-4xl mb-3">📋</div>
-                <p>No screening sessions yet. Complete a screening to see history.</p>
+                <div className="text-4xl mb-3">📋</div><p>No screening sessions yet</p>
               </div>
-            ) : (candidate.screeningSessions||[]).map((s,i)=>(
+            ) : sessions.map((s,i)=>(
               <div key={i} className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
                 <div className={`px-5 py-3 flex items-center justify-between ${s.sessionType==="ai_generated"?"bg-blue-50":"bg-purple-50"}`}>
                   <div className="flex items-center gap-3">
-                    <span className="text-sm font-bold">{s.sessionType==="ai_generated"?"🤖 AI Generated":"📋 Job Bank"}</span>
-                    {s.difficulty && <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${DIFF_CFG[s.difficulty as keyof typeof DIFF_CFG]?.inactive||""}`}>{DIFF_CFG[s.difficulty as keyof typeof DIFF_CFG]?.icon} {s.difficulty}</span>}
-                    <span className="text-xs text-gray-400">{s.conductedAt ? new Date(s.conductedAt).toLocaleDateString() : ""}</span>
+                    <span className="text-sm font-bold">{s.sessionType==="ai_generated"?"🤖 AI":"📋 Bank"}</span>
+                    {s.difficulty && <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${DIFF[s.difficulty as keyof typeof DIFF]?.pale||""}`}>{s.difficulty}</span>}
+                    <span className="text-xs text-gray-400">{s.conductedAt?new Date(s.conductedAt).toLocaleDateString():""}</span>
+                    <span className="text-xs text-gray-400">{s.conductedBy}</span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-gray-500">by {s.conductedBy||"Recruiter"}</span>
-                    <span className={`text-sm font-black ${s.screeningScore>=80?"text-emerald-600":s.screeningScore>=60?"text-blue-600":"text-amber-600"}`}>{s.screeningScore}/100</span>
-                  </div>
+                  <span className={`text-lg font-black ${clr(s.screeningScore)}`}>{s.screeningScore}/100</span>
                 </div>
-                {(s.answers||[]).length>0 && (
-                  <div className="divide-y divide-gray-50">
-                    {s.answers!.map((a,j)=>(
-                      <div key={j} className="px-5 py-3 flex items-start justify-between gap-4">
-                        <p className="text-xs text-gray-700 flex-1">{a.question}</p>
-                        {a.aiScore!=null && <span className={`text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${a.aiScore>=80?"bg-emerald-100 text-emerald-700":a.aiScore>=60?"bg-blue-100 text-blue-700":"bg-amber-100 text-amber-700"}`}>{a.aiScore}</span>}
-                      </div>
-                    ))}
+                {(s.answers||[]).slice(0,3).map((a,j)=>(
+                  <div key={j} className="px-5 py-3 border-b border-gray-50 flex justify-between gap-4">
+                    <p className="text-xs text-gray-600 flex-1 truncate">{a.question}</p>
+                    {a.aiScore!=null && <span className={`text-xs font-bold shrink-0 ${clr(a.aiScore)}`}>{a.aiScore}/100</span>}
                   </div>
-                )}
+                ))}
+                {(s.answers||[]).length>3 && <div className="px-5 py-2 text-xs text-gray-400">+{(s.answers||[]).length-3} more answers</div>}
               </div>
             ))}
           </div>
         )}
 
-        {/* ── HM REPORT ── */}
+        {/* HM REPORT */}
         {tab==="hm-report" && (
-          <div className="space-y-5">
-            <div className="bg-white rounded-2xl border border-gray-100 p-6">
-              <h2 className="font-bold text-gray-900 text-lg mb-2">📋 Select Report to Share with HM</h2>
-              <p className="text-sm text-gray-500 mb-5">Select which score to share with the Hiring Manager. Option 1 is always available. Options 2 & 3 unlock after screening.</p>
+          <div className="bg-white rounded-2xl p-6 border border-gray-100">
+            <h2 className="font-bold text-gray-900 text-lg mb-2">📋 Choose Report for Hiring Manager</h2>
+            <p className="text-sm text-gray-500 mb-6">Select what evidence to base the final score on. The HM sees only what you choose.</p>
 
-              {/* Option cards */}
-              <div className="space-y-3 mb-6">
-
-                {/* ── Option 1: AI CV Screening Score Only ── */}
-                <button onClick={()=>setHmMode("cv_only")}
-                  className={`w-full p-5 rounded-xl border-2 text-left transition-all ${hmMode==="cv_only"?"border-blue-500 bg-blue-50 shadow-sm":"border-gray-200 hover:border-blue-300"}`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">📄</span>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-gray-900">AI CV Screening Score</span>
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">Always available</span>
-                        </div>
-                        <div className="text-sm text-gray-500 mt-0.5">Based on AI analysis of resume — skills depth and stability</div>
+            <div className="space-y-3 mb-6">
+              {/* Option 1 */}
+              <button onClick={()=>setHmMode("cv_only")}
+                className={`w-full p-5 rounded-xl border-2 text-left transition-all ${hmMode==="cv_only"?"border-blue-500 bg-blue-50":"border-gray-200 hover:border-blue-200"}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">📄</span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-gray-900">AI CV Screening Score Only</span>
+                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">Always available</span>
                       </div>
-                    </div>
-                    <div className="text-right shrink-0 ml-4">
-                      <div className={`text-3xl font-black ${cvScore>=80?"text-emerald-600":cvScore>=60?"text-blue-600":cvScore>=40?"text-amber-600":"text-red-600"}`}>{cvScore}</div>
-                      <div className="text-xs text-gray-400">/ 100</div>
+                      <p className="text-xs text-gray-500 mt-0.5">{isTech?"Skills depth 70% + Stability 30%":"Experience relevance 60% + Stability 40%"}</p>
                     </div>
                   </div>
-                  <div className="mt-3 flex items-center gap-2 flex-wrap">
-                    <span className="text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full font-medium">Skills Match: {candidate.cvScoreBreakdown?.skillsMatchScore||0} × 70%</span>
-                    <span className="text-xs text-gray-300">+</span>
-                    <span className="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full font-medium">Stability: {candidate.cvScoreBreakdown?.stabilityScore||0} × 30%</span>
-                  </div>
-                </button>
-
-                {/* ── Option 2: AI CV + AI Questions ── */}
-                <button onClick={()=>{ if(aiSessions.length>0) setHmMode("cv_ai_questions"); }}
-                  className={`w-full p-5 rounded-xl border-2 text-left transition-all ${
-                    aiSessions.length===0
-                      ? "border-gray-100 bg-gray-50 cursor-not-allowed"
-                      : hmMode==="cv_ai_questions"
-                        ? "border-purple-500 bg-purple-50 shadow-sm"
-                        : "border-gray-200 hover:border-purple-300"
-                  }`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className={`text-2xl ${aiSessions.length===0?"grayscale opacity-40":""}`}>🤖</span>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className={`font-bold ${aiSessions.length===0?"text-gray-400":"text-gray-900"}`}>AI CV Score + AI Questions Score</span>
-                          {aiSessions.length===0
-                            ? <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">Complete screening first</span>
-                            : <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-semibold">{aiSessions.length} session{aiSessions.length>1?"s":""}</span>
-                          }
-                        </div>
-                        <div className={`text-sm mt-0.5 ${aiSessions.length===0?"text-gray-400":"text-gray-500"}`}>
-                          {aiSessions.length===0
-                            ? "Go to Generate Questions → AI Generated → complete screening"
-                            : `Latest AI screening: ${aiSessions[aiSessions.length-1]?.screeningScore||0}/100 on ${aiSessions[aiSessions.length-1]?.conductedAt ? new Date(aiSessions[aiSessions.length-1].conductedAt!).toLocaleDateString() : "—"}`
-                          }
-                        </div>
-                      </div>
-                    </div>
-                    {aiSessions.length>0 && (
-                      <div className="text-right shrink-0 ml-4">
-                        <div className="text-3xl font-black text-purple-600">
-                          {Math.round((cvScore*0.6)+(aiSessions[aiSessions.length-1].screeningScore*0.4))}
-                        </div>
-                        <div className="text-xs text-gray-400">/ 100</div>
-                      </div>
-                    )}
-                  </div>
-                  {aiSessions.length>0 && (
-                    <div className="mt-3 flex items-center gap-2 flex-wrap">
-                      <span className="text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full font-medium">CV: {cvScore} × 60%</span>
-                      <span className="text-xs text-gray-300">+</span>
-                      <span className="text-xs bg-purple-100 text-purple-700 px-2.5 py-1 rounded-full font-medium">AI Screen: {aiSessions[aiSessions.length-1]?.screeningScore||0} × 40%</span>
-                    </div>
-                  )}
-                </button>
-
-                {/* ── Option 3: AI CV + Question Bank ── */}
-                <button onClick={()=>{ if(bankSessions.length>0) setHmMode("cv_bank_questions"); }}
-                  className={`w-full p-5 rounded-xl border-2 text-left transition-all ${
-                    bankSessions.length===0
-                      ? "border-gray-100 bg-gray-50 cursor-not-allowed"
-                      : hmMode==="cv_bank_questions"
-                        ? "border-emerald-500 bg-emerald-50 shadow-sm"
-                        : "border-gray-200 hover:border-emerald-300"
-                  }`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className={`text-2xl ${bankSessions.length===0?"grayscale opacity-40":""}`}>📋</span>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className={`font-bold ${bankSessions.length===0?"text-gray-400":"text-gray-900"}`}>AI CV Score + Question Bank Score</span>
-                          {bankSessions.length===0
-                            ? <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">Complete screening first</span>
-                            : <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">{bankSessions.length} session{bankSessions.length>1?"s":""}</span>
-                          }
-                        </div>
-                        <div className={`text-sm mt-0.5 ${bankSessions.length===0?"text-gray-400":"text-gray-500"}`}>
-                          {bankSessions.length===0
-                            ? "Go to Generate Questions → From Job Bank → complete screening"
-                            : `Latest bank screening: ${bankSessions[bankSessions.length-1]?.screeningScore||0}/100 on ${bankSessions[bankSessions.length-1]?.conductedAt ? new Date(bankSessions[bankSessions.length-1].conductedAt!).toLocaleDateString() : "—"}`
-                          }
-                        </div>
-                      </div>
-                    </div>
-                    {bankSessions.length>0 && (
-                      <div className="text-right shrink-0 ml-4">
-                        <div className="text-3xl font-black text-emerald-600">
-                          {Math.round((cvScore*0.6)+(bankSessions[bankSessions.length-1].screeningScore*0.4))}
-                        </div>
-                        <div className="text-xs text-gray-400">/ 100</div>
-                      </div>
-                    )}
-                  </div>
-                  {bankSessions.length>0 && (
-                    <div className="mt-3 flex items-center gap-2 flex-wrap">
-                      <span className="text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full font-medium">CV: {cvScore} × 60%</span>
-                      <span className="text-xs text-gray-300">+</span>
-                      <span className="text-xs bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full font-medium">Bank Screen: {bankSessions[bankSessions.length-1]?.screeningScore||0} × 40%</span>
-                    </div>
-                  )}
-                </button>
-              </div>
-
-              {/* Submit button */}
-              {hmResult ? (
-                <div className="bg-emerald-50 rounded-xl p-5 border border-emerald-200 mb-4">
-                  <p className="font-bold text-emerald-700 text-lg">✅ Candidate is HM Ready!</p>
-                  <p className="text-sm text-emerald-600 mt-1">Report type: <strong>{hmResult.reportType?.replace(/_/g," ").replace(/\b\w/g,l=>l.toUpperCase())}</strong> · Final Score: <strong>{hmResult.finalScore}/100</strong> · Recommendation: <strong>{hmResult.recommendation}</strong></p>
+                  <div className={`text-3xl font-black shrink-0 ml-4 ${clr(cvScore)}`}>{cvScore}</div>
                 </div>
-              ) : (
-                <button onClick={submitHMReport} disabled={submittingHM}
-                  className="w-full bg-slate-800 text-white py-4 rounded-xl font-bold hover:bg-slate-900 disabled:opacity-60 text-base">
-                  {submittingHM?"⏳ Saving...":"✅ Mark as HM Ready & Set Report"}
-                </button>
-              )}
+                <div className="mt-2 flex gap-2 flex-wrap">
+                  <span className="text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full">{cvLabel1}: {candidate.cvScoreBreakdown?.skillsMatchScore||0}</span>
+                  <span className="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full">Stability: {candidate.cvScoreBreakdown?.stabilityScore||0}</span>
+                </div>
+              </button>
 
-              {/* Generate Report button */}
-              {candidate.status==="hm_ready" && (
-                <button onClick={generateHMScorecard}
-                  className="w-full mt-3 border-2 border-slate-800 text-slate-800 py-3 rounded-xl font-bold hover:bg-slate-50 text-sm flex items-center justify-center gap-2">
-                  📋 Open Printable HM Report
-                </button>
-              )}
+              {/* Option 2 */}
+              <button onClick={()=>{ if(hasAI) setHmMode("cv_ai_questions"); }}
+                className={`w-full p-5 rounded-xl border-2 text-left transition-all ${!hasAI?"border-gray-100 bg-gray-50 cursor-not-allowed":hmMode==="cv_ai_questions"?"border-purple-500 bg-purple-50":"border-gray-200 hover:border-purple-200"}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className={`text-2xl ${!hasAI?"grayscale opacity-40":""}`}>🤖</span>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`font-bold ${!hasAI?"text-gray-400":"text-gray-900"}`}>CV + AI Generated Questions</span>
+                        {!hasAI
+                          ? <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">Complete AI screening first</span>
+                          : <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-semibold">{aiSess.length} session{aiSess.length>1?"s":""}</span>
+                        }
+                      </div>
+                      <p className={`text-xs mt-0.5 ${!hasAI?"text-gray-400":"text-gray-500"}`}>
+                        {hasAI?`Latest: ${aiSess[aiSess.length-1]?.screeningScore||0}/100`:"Go to Generate Questions → AI Generated"}
+                      </p>
+                    </div>
+                  </div>
+                  {hasAI && <div className={`text-3xl font-black shrink-0 ml-4 ${clr(Math.round(cvScore*0.6+(aiSess[aiSess.length-1].screeningScore||0)*0.4))}`}>{Math.round(cvScore*0.6+(aiSess[aiSess.length-1].screeningScore||0)*0.4)}</div>}
+                </div>
+                {hasAI && <div className="mt-2 flex gap-2"><span className="text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full">CV {cvScore}×60%</span><span className="text-xs text-gray-300">+</span><span className="text-xs bg-purple-100 text-purple-700 px-2.5 py-1 rounded-full">Screen {aiSess[aiSess.length-1]?.screeningScore||0}×40%</span></div>}
+              </button>
+
+              {/* Option 3 */}
+              <button onClick={()=>{ if(hasBank) setHmMode("cv_bank_questions"); }}
+                className={`w-full p-5 rounded-xl border-2 text-left transition-all ${!hasBank?"border-gray-100 bg-gray-50 cursor-not-allowed":hmMode==="cv_bank_questions"?"border-emerald-500 bg-emerald-50":"border-gray-200 hover:border-emerald-200"}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className={`text-2xl ${!hasBank?"grayscale opacity-40":""}`}>📋</span>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`font-bold ${!hasBank?"text-gray-400":"text-gray-900"}`}>CV + Question Bank Screening</span>
+                        {!hasBank
+                          ? <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">Complete bank screening first</span>
+                          : <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">{bankSess.length} session{bankSess.length>1?"s":""}</span>
+                        }
+                      </div>
+                      <p className={`text-xs mt-0.5 ${!hasBank?"text-gray-400":"text-gray-500"}`}>
+                        {hasBank?`Latest: ${bankSess[bankSess.length-1]?.screeningScore||0}/100`:"Go to Generate Questions → From Job Bank"}
+                      </p>
+                    </div>
+                  </div>
+                  {hasBank && <div className={`text-3xl font-black shrink-0 ml-4 ${clr(Math.round(cvScore*0.6+(bankSess[bankSess.length-1].screeningScore||0)*0.4))}`}>{Math.round(cvScore*0.6+(bankSess[bankSess.length-1].screeningScore||0)*0.4)}</div>}
+                </div>
+                {hasBank && <div className="mt-2 flex gap-2"><span className="text-xs bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full">CV {cvScore}×60%</span><span className="text-xs text-gray-300">+</span><span className="text-xs bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full">Screen {bankSess[bankSess.length-1]?.screeningScore||0}×40%</span></div>}
+              </button>
             </div>
+
+            {hmDone ? (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 text-center">
+                <p className="font-bold text-emerald-800 text-lg">✅ Candidate is HM Ready!</p>
+                <p className="text-sm text-emerald-600 mt-1">Report: <strong>{hmMode.replace(/_/g," ").replace(/\b\w/g,l=>l.toUpperCase())}</strong> · Final Score: <strong>{candidate.combinedScore}/100</strong> · {candidate.recommendation}</p>
+              </div>
+            ) : (
+              <button onClick={setHMReport} disabled={hmLoading}
+                className="w-full bg-slate-800 text-white py-4 rounded-xl font-bold hover:bg-slate-900 disabled:opacity-60 text-base">
+                {hmLoading?"⏳ Saving...":"✅ Confirm & Mark as HM Ready"}
+              </button>
+            )}
           </div>
         )}
       </div>

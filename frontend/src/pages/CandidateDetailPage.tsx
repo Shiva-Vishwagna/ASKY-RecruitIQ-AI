@@ -526,12 +526,18 @@ export default function CandidateDetailPage() {
               className={`text-xs font-semibold px-3 py-1.5 rounded-lg focus:ring-2 focus:ring-blue-500 cursor-pointer border-0 ${curStage.color}`}>
               {STAGES.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
-            <div className="flex gap-2">
-              <button onClick={rescreen} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-blue-700">🔄 Re-screen CV</button>
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={rescreen}
+                className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-all ${cvScore===0?"bg-red-600 text-white hover:bg-red-700 animate-pulse":"bg-blue-600 text-white hover:bg-blue-700"}`}>
+                🔄 {cvScore===0?"Run AI Screening":"Re-screen CV"}
+              </button>
               {candidate.status==="hm_ready" && (
                 <button onClick={generateHMScorecard} className="text-xs bg-slate-800 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-slate-700">📋 HM Report</button>
               )}
             </div>
+            {cvScore===0 && (
+              <div className="text-xs text-red-500 font-medium mt-1">⚠️ CV Score = 0. Check GROQ_API_KEY in Render → Environment</div>
+            )}
           </div>
         </div>
 
@@ -726,42 +732,134 @@ export default function CandidateDetailPage() {
         {/* ── AI INSIGHTS ── */}
         {tab==="ai-insights" && (
           <div className="space-y-5">
+
+            {/* Empty state — show if no AI data */}
+            {!(candidate.summary||candidate.hmSummary||candidate.strengths?.length||candidate.gaps?.length||candidate.interviewFocusAreas?.length) && (
+              <div className="bg-white rounded-2xl p-10 border border-gray-100 text-center">
+                <div className="text-5xl mb-4">🤖</div>
+                <p className="font-bold text-gray-700 mb-2">No AI Insights Yet</p>
+                <p className="text-sm text-gray-500 mb-4">Click "🔄 Re-screen CV" to run AI analysis on this candidate</p>
+                <button onClick={rescreen}
+                  className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700">
+                  🔄 Re-screen CV Now
+                </button>
+              </div>
+            )}
+
+            {/* HM Summary */}
+            {(candidate.hmSummary||candidate.summary) && (
+              <div className="bg-white rounded-2xl p-6 border border-gray-100">
+                <h3 className="font-bold text-gray-900 mb-3">🎯 Hiring Manager Briefing</h3>
+                <p className="text-gray-600 leading-relaxed text-sm">{candidate.hmSummary||candidate.summary}</p>
+              </div>
+            )}
+
+            {/* Strengths & Gaps */}
             {((candidate.strengths?.length||0)+(candidate.gaps?.length||0))>0 && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {(candidate.strengths?.length||0)>0 && (
-                  <div className="bg-white rounded-2xl p-5 border border-gray-100">
-                    <h3 className="font-bold text-emerald-700 mb-3">✅ Strengths</h3>
-                    <ul className="space-y-2">{candidate.strengths!.map((s,i)=><li key={i} className="text-sm text-gray-700 flex gap-2"><span className="text-emerald-500 shrink-0">•</span>{s}</li>)}</ul>
+                  <div className="bg-emerald-50 rounded-2xl p-5 border border-emerald-100">
+                    <h3 className="font-bold text-emerald-800 mb-3">✅ Strengths</h3>
+                    <ul className="space-y-2">
+                      {candidate.strengths!.map((s,i)=>(
+                        <li key={i} className="text-sm text-gray-700 flex gap-2 items-start">
+                          <span className="text-emerald-500 shrink-0 mt-0.5">•</span>{s}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
                 {(candidate.gaps?.length||0)>0 && (
-                  <div className="bg-white rounded-2xl p-5 border border-gray-100">
-                    <h3 className="font-bold text-amber-700 mb-3">⚠️ Concerns / Gaps</h3>
-                    <ul className="space-y-2">{candidate.gaps!.map((g,i)=><li key={i} className="text-sm text-gray-700 flex gap-2"><span className="text-amber-500 shrink-0">•</span>{g}</li>)}</ul>
+                  <div className="bg-amber-50 rounded-2xl p-5 border border-amber-100">
+                    <h3 className="font-bold text-amber-800 mb-3">⚠️ Concerns / Gaps</h3>
+                    <ul className="space-y-2">
+                      {candidate.gaps!.map((g,i)=>(
+                        <li key={i} className="text-sm text-gray-700 flex gap-2 items-start">
+                          <span className="text-amber-500 shrink-0 mt-0.5">•</span>{g}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>
             )}
+
+            {/* HM Interview Focus Areas */}
             {(candidate.interviewFocusAreas?.length||0)>0 && (
               <div className="bg-white rounded-2xl p-5 border border-gray-100">
-                <h3 className="font-bold text-gray-900 mb-3">🎯 HM Interview Focus Areas</h3>
-                <div className="space-y-2">
+                <h3 className="font-bold text-gray-900 mb-4">🎯 Suggested HM Interview Focus Areas</h3>
+                <div className="space-y-3">
                   {candidate.interviewFocusAreas!.map((a,i)=>(
                     <div key={i} className="flex gap-3 items-start">
-                      <span className="w-6 h-6 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold shrink-0">{i+1}</span>
-                      <p className="text-sm text-gray-700">{a}</p>
+                      <span className="w-7 h-7 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold shrink-0">{i+1}</span>
+                      <p className="text-sm text-gray-700 pt-0.5">{a}</p>
                     </div>
                   ))}
                 </div>
               </div>
             )}
+
+            {/* Experience breakdown */}
             {(candidate.technicalExperience||candidate.leadershipExperience||candidate.cloudExpertise) && (
-              <div className="grid grid-cols-3 gap-4">
-                {candidate.technicalExperience && <div className="bg-blue-50 rounded-xl p-4"><div className="text-blue-600 text-xs font-bold uppercase mb-2">🔧 Technical</div><p className="text-gray-600 text-sm">{candidate.technicalExperience}</p></div>}
-                {candidate.leadershipExperience && <div className="bg-purple-50 rounded-xl p-4"><div className="text-purple-600 text-xs font-bold uppercase mb-2">👥 Leadership</div><p className="text-gray-600 text-sm">{candidate.leadershipExperience}</p></div>}
-                {candidate.cloudExpertise && <div className="bg-emerald-50 rounded-xl p-4"><div className="text-emerald-600 text-xs font-bold uppercase mb-2">☁️ Cloud</div><p className="text-gray-600 text-sm">{candidate.cloudExpertise}</p></div>}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {candidate.technicalExperience && (
+                  <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
+                    <div className="text-blue-700 text-xs font-bold uppercase tracking-wide mb-2">🔧 {isTech?"Technical":"Domain"} Experience</div>
+                    <p className="text-gray-700 text-sm leading-relaxed">{candidate.technicalExperience}</p>
+                  </div>
+                )}
+                {candidate.leadershipExperience && candidate.leadershipExperience !== "None mentioned" && (
+                  <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
+                    <div className="text-purple-700 text-xs font-bold uppercase tracking-wide mb-2">👥 Leadership</div>
+                    <p className="text-gray-700 text-sm leading-relaxed">{candidate.leadershipExperience}</p>
+                  </div>
+                )}
+                {candidate.cloudExpertise && candidate.cloudExpertise !== "None mentioned" && (
+                  <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-100">
+                    <div className="text-emerald-700 text-xs font-bold uppercase tracking-wide mb-2">☁️ Cloud / Tools</div>
+                    <p className="text-gray-700 text-sm leading-relaxed">{candidate.cloudExpertise}</p>
+                  </div>
+                )}
               </div>
             )}
+
+            {/* Risk flags */}
+            {(candidate.riskFlags?.frequentJobChanges || (candidate.riskFlags?.missingMandatorySkills||[]).length>0 || candidate.riskFlags?.domainMismatch) && (
+              <div className="bg-red-50 rounded-2xl p-5 border border-red-200">
+                <h3 className="font-bold text-red-800 mb-3">⚠️ Risk Flags Detected</h3>
+                <div className="flex flex-wrap gap-2">
+                  {candidate.riskFlags?.frequentJobChanges && <span className="bg-red-100 text-red-700 text-xs font-semibold px-3 py-1.5 rounded-full">🔄 Frequent job changes</span>}
+                  {candidate.riskFlags?.domainMismatch     && <span className="bg-orange-100 text-orange-700 text-xs font-semibold px-3 py-1.5 rounded-full">🎯 Domain mismatch</span>}
+                  {(candidate.riskFlags?.missingMandatorySkills||[]).map(s=><span key={s} className="bg-amber-100 text-amber-700 text-xs font-semibold px-3 py-1.5 rounded-full">Missing: {s}</span>)}
+                </div>
+              </div>
+            )}
+
+            {/* Skill scores */}
+            {(candidate.skillScores?.length||0)>0 && (
+              <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                <h3 className="font-bold text-gray-900 mb-4">📊 Skill Proficiency</h3>
+                <div className="space-y-3">
+                  {candidate.skillScores!.map(({skill,score:s})=>(
+                    <Bar key={skill} label={skill} score={s}
+                      color={s>=80?"bg-emerald-500":s>=60?"bg-blue-500":"bg-amber-500"}/>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tech stack */}
+            {((candidate.databases?.length||0)+(candidate.frameworks?.length||0)+(candidate.tools?.length||0))>0 && (
+              <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                <h3 className="font-bold text-gray-900 mb-4">💻 {isTech?"Tech Stack":"Tools & Systems"}</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  {(candidate.databases?.length||0)>0 && <div><div className="text-xs font-bold text-gray-400 uppercase mb-2">🗄️ Databases</div><div className="flex flex-wrap gap-1.5">{candidate.databases!.map(d=><span key={d} className="bg-orange-50 text-orange-700 text-xs px-2.5 py-1 rounded-full border border-orange-100">{d}</span>)}</div></div>}
+                  {(candidate.frameworks?.length||0)>0 && <div><div className="text-xs font-bold text-gray-400 uppercase mb-2">⚙️ Frameworks</div><div className="flex flex-wrap gap-1.5">{candidate.frameworks!.map(f=><span key={f} className="bg-violet-50 text-violet-700 text-xs px-2.5 py-1 rounded-full border border-violet-100">{f}</span>)}</div></div>}
+                  {(candidate.tools?.length||0)>0 && <div><div className="text-xs font-bold text-gray-400 uppercase mb-2">🛠️ Tools</div><div className="flex flex-wrap gap-1.5">{candidate.tools!.map(t=><span key={t} className="bg-gray-100 text-gray-700 text-xs px-2.5 py-1 rounded-full">{t}</span>)}</div></div>}
+                </div>
+              </div>
+            )}
+
           </div>
         )}
 

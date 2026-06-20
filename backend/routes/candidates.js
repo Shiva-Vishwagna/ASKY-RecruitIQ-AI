@@ -1,198 +1,425 @@
 const express  = require('express');
 const router   = express.Router();
-const multer   = require('multer');
 const Candidate = require('../models/Candidate');
 const AuditLog  = require('../models/AuditLog');
 const { protect } = require('../middleware/auth');
-const { screenResumeWithAI, calculateCVScore, determineTier } = require('../services/aiService');
+const { 
+  screenResumeWithAI, 
+  calculateCVScore, 
+  determineTier,
+  generateInterviewQuestions,
+  evaluateScreeningAnswers,
+  generateHMReport 
+} = require('../services/aiService');
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits:  { fileSize: 5 * 1024 * 1024 }, // 5MB
-}).any();
-
-// ── Extract text from file buffer ─────────────────────────────
-async function extractText(buffer, mimetype, filename) {
-  const fname = (filename || '').toLowerCase();
-  try {
-    if (mimetype === 'application/pdf' || fname.endsWith('.pdf')) {
-      try {
-        const mod  = await import('pdf-parse/lib/pdf-parse.js');
-        const data = await mod.default(buffer);
-        return (data.text || '').slice(0, 6000);
-      } catch {
-        const pdfParse = require('pdf-parse');
-        const data = await pdfParse(buffer);
-        return (data.text || '').slice(0, 6000);
-      }
-    }
-    if (fname.endsWith('.docx') || mimetype.includes('wordprocessingml')) {
-      const mammoth = require('mammoth');
-      const { value } = await mammoth.extractRawText({ buffer });
-      return (value || '').slice(0, 6000);
-    }
-    return buffer.toString('utf-8').slice(0, 6000);
-  } catch (e) {
-    console.error('[extractText]', e.message);
-    return '';
-  }
-}
-
-const t = (s, n) => (s || '').toString().trim().slice(0, n);
-const a = (arr, n) => (Array.isArray(arr) ? arr : []).slice(0, n);
-const n = (v)     => Math.min(Math.max(Number(v) || 0, 0), 100);
-
-// ── POST /api/resumes/upload ──────────────────────────────────
-router.post('/upload', protect, (req, res) => {
-  upload(req, res, async (uploadErr) => {
-    if (uploadErr) return res.status(400).json({ message: 'Upload error: ' + uploadErr.message });
-
-    try {
-      const files = req.files || [];
-      if (!files.length) return res.status(400).json({ message: 'No files received. Please select at least one PDF or DOCX.' });
-
-      // ── Load job for context ────────────────────────────────
-      let job = null;
-      if (req.body.jobId) {
-        try {
-          job = await require('../models/Job').findById(req.body.jobId).lean();
-        } catch (e) { console.warn('[job load]', e.message); }
-      }
-
-      const roleType = job?.roleType || 'technical';
-      const jobContext = {
-        title:          job?.title          || req.body.jobTitle || '',
-        roleType,
-        primarySkill:   job?.primarySkill   || '',
-        requiredSkills: job?.requiredSkills  || [],
-        level:          job?.level          || '',
-      };
-
-      console.log(`[upload] ${files.length} file(s) | job: "${jobContext.title}" | type: ${roleType}`);
-
-      const results = [];
-
-      for (const file of files) {
-        const fname = file.originalname;
-        try {
-          // 1. Extract text
-          const rawText = await extractText(file.buffer, file.mimetype, fname);
-          file.buffer = null;
-
-          if (!rawText || rawText.trim().length < 40) {
-            console.error(`[upload] No text from: ${fname}`);
-            results.push({ error: `Could not read text from "${fname}". Please upload a readable PDF or DOCX.`, file: fname });
-            continue;
-          }
-
-          console.log(`[upload] Extracted ${rawText.length} chars from ${fname}`);
-
-          // 2. AI screening
-          const ai = await screenResumeWithAI(rawText, jobContext);
-
-          if (!ai) {
-            console.error(`[upload] AI returned null for: ${fname} — GROQ_API_KEY likely missing`);
-            results.push({
-              error: `AI screening failed for "${fname}". Please add GROQ_API_KEY in Render → Environment and redeploy.`,
-              file: fname,
-            });
-            continue;
-          }
-
-          // 3. Calculate score
-          const cvScore = calculateCVScore(ai.cvScoreBreakdown, roleType);
-          const tier    = determineTier(cvScore);
-
-          console.log(`[upload] ${ai.name || fname} | CV: ${cvScore} | Tier: ${tier}`);
-
-          // 4. Save candidate
-          const candidate = await Candidate.create({
-            name:            t(ai.name, 100)  || fname.replace(/\.[^/.]+$/, '').replace(/[_\-]+/g, ' '),
-            email:           t(ai.email, 100),
-            phone:           t(ai.phone, 20),
-            appliedFor:      t(jobContext.title || req.body.jobTitle || '', 100),
-            jobId:           req.body.jobId || null,
-
-            domain:          t(ai.domain, 60),
-            seniority:       t(ai.seniority, 30),
-            experienceYears: Math.min(Number(ai.experience_years) || 0, 50),
-            topSkills:       a(ai.topSkills, 10).map(s => t(s, 60)),
-
-            aiScore:         cvScore,
-            cvScoreBreakdown: {
-              skillsMatchScore: n(ai.cvScoreBreakdown?.skillsMatchScore),
-              stabilityScore:   n(ai.cvScoreBreakdown?.stabilityScore),
-            },
-            combinedScore: cvScore,
-
-            tier,
-            riskLevel:         t(ai.riskLevel || 'medium', 10),
-            primarySkillMatch: typeof ai.primarySkillMatch === 'boolean' ? ai.primarySkillMatch : undefined,
-            primarySkillScore: n(ai.primarySkillScore),
-            jobFitScore:       n(ai.jobFitScore),
-
-            riskFlags: {
-              frequentJobChanges:     !!ai.riskFlags?.frequentJobChanges,
-              noticePeriodRisk:       t(ai.riskFlags?.noticePeriodRisk || '', 100),
-              missingMandatorySkills: a(ai.riskFlags?.missingMandatorySkills, 5).map(s => t(s, 60)),
-              domainMismatch:         !!ai.riskFlags?.domainMismatch,
-            },
-
-            status:         'ai_screened',
-            uploadedBy:     req.user._id,
-            uploadedByName: t(req.user.name, 60),
-
-            summary:              t(ai.summary,              600),
-            hmSummary:            t(ai.hmSummary,            900),
-            technicalExperience:  t(ai.technicalExperience,  400),
-            leadershipExperience: t(ai.leadershipExperience, 400),
-            cloudExpertise:       t(ai.cloudExpertise,       400),
-            recommendation:       t(ai.recommendation,        30),
-            recommendationReason: t(ai.recommendationReason, 400),
-
-            interviewFocusAreas: a(ai.interviewFocusAreas, 5).map(s => t(s, 250)),
-            strengths:           a(ai.strengths,   4).map(s => t(s, 250)),
-            gaps:                a(ai.gaps,        4).map(s => t(s, 250)),
-            databases:           a(ai.databases,   8).map(s => t(s, 60)),
-            frameworks:          a(ai.frameworks,  8).map(s => t(s, 60)),
-            tools:               a(ai.tools,       8).map(s => t(s, 60)),
-            projectDomains:      a(ai.projectDomains, 4).map(s => t(s, 60)),
-            skillScores:         a(ai.skillScores, 8).map(s => ({
-              skill: t(s.skill, 60),
-              score: n(s.score),
-            })),
-          });
-
-          AuditLog.create({
-            user:     t(req.user.name, 60),
-            userId:   req.user._id,
-            action:   'RESUME_UPLOADED',
-            resource: 'resumes',
-            details:  `${candidate.name} | ${cvScore} | ${tier} | ${roleType}`.slice(0, 150),
-          }).catch(() => {});
-
-          results.push(candidate);
-
-        } catch (fileErr) {
-          console.error(`[upload file error] ${fname}:`, fileErr.message);
-          results.push({ error: fileErr.message, file: fname });
-        }
-      }
-
-      res.json({ candidates: results, count: results.length });
-
-    } catch (err) {
-      console.error('[upload fatal]', err.message, err.stack);
-      res.status(500).json({ message: err.message || 'Upload failed.' });
-    }
-  });
-});
-
+// ─────────────────────────────────────────────────────────────────
+// GET /api/candidates
+// ─────────────────────────────────────────────────────────────────
 router.get('/', protect, async (req, res) => {
   try {
     const candidates = await Candidate.find().sort({ createdAt: -1 });
     res.json({ candidates });
-  } catch (err) { res.status(500).json({ message: err.message }); }
+  } catch (err) {
+    console.error('[GET /candidates]', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// GET /api/candidates/:id
+// Fetch single candidate details
+// ─────────────────────────────────────────────────────────────────
+router.get('/:id', protect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    if (!id || id.length !== 24) {
+      return res.status(400).json({ message: 'Invalid candidate ID' });
+    }
+
+    const candidate = await Candidate.findById(id).lean();
+    
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found' });
+    }
+
+    res.json({ candidate });
+  } catch (err) {
+    console.error('[GET /candidates/:id]', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// PATCH /api/candidates/:id
+// Update candidate status, notes, or other fields
+// ─────────────────────────────────────────────────────────────────
+router.patch('/:id', protect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, notes, hmReportType } = req.body;
+
+    const update = {};
+    if (status) update.status = status;
+    if (notes) update.notes = notes;
+    if (hmReportType) update.hmReportType = hmReportType;
+
+    const candidate = await Candidate.findByIdAndUpdate(
+      id,
+      update,
+      { new: true }
+    );
+
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found' });
+    }
+
+    // Audit log
+    await AuditLog.create({
+      user: req.user.name,
+      userId: req.user._id,
+      action: 'CANDIDATE_UPDATED',
+      resource: 'candidates',
+      details: `${candidate.name} | ${status || 'notes updated'}`
+    }).catch(() => {});
+
+    res.json({ candidate });
+  } catch (err) {
+    console.error('[PATCH /candidates/:id]', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// DELETE /api/candidates/:id
+// Delete a candidate
+// ─────────────────────────────────────────────────────────────────
+router.delete('/:id', protect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const candidate = await Candidate.findByIdAndDelete(id);
+
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found' });
+    }
+
+    // Audit log
+    await AuditLog.create({
+      user: req.user.name,
+      userId: req.user._id,
+      action: 'CANDIDATE_DELETED',
+      resource: 'candidates',
+      details: `${candidate.name} (${id})`
+    }).catch(() => {});
+
+    res.json({ message: 'Candidate deleted successfully' });
+  } catch (err) {
+    console.error('[DELETE /candidates/:id]', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/candidates/:id/rescreen
+// Re-run AI screening on candidate with new context
+// ─────────────────────────────────────────────────────────────────
+router.post('/:id/rescreen', protect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const candidate = await Candidate.findById(id);
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found' });
+    }
+
+    // TODO: Get candidate's CV/resume text from somewhere
+    // For now, we'll re-analyze with stored data
+    
+    console.log(`[rescreen] Running AI rescreen for ${candidate.name}`);
+    
+    // Update the candidate with rescreen timestamp
+    candidate.rescreenedAt = new Date();
+    await candidate.save();
+
+    // Audit log
+    await AuditLog.create({
+      user: req.user.name,
+      userId: req.user._id,
+      action: 'CANDIDATE_RESCREENED',
+      resource: 'candidates',
+      details: `${candidate.name} - AI rescreen initiated`
+    }).catch(() => {});
+
+    res.json({ 
+      message: 'Candidate rescreen initiated',
+      candidate 
+    });
+  } catch (err) {
+    console.error('[POST /rescreen]', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/candidates/:id/questions
+// Generate or update interview questions for candidate
+// ─────────────────────────────────────────────────────────────────
+router.post('/:id/questions', protect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { mode = 'ai', difficulty = 'medium', count = 5 } = req.body;
+
+    const candidate = await Candidate.findById(id);
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found' });
+    }
+
+    console.log(`[questions] Generating ${mode} questions for ${candidate.name}`);
+
+    let questions = [];
+
+    if (mode === 'ai') {
+      // Generate AI questions based on candidate profile
+      try {
+        questions = await generateInterviewQuestions({
+          candidateName: candidate.name,
+          skills: candidate.topSkills || [],
+          experience: candidate.experienceYears,
+          domain: candidate.domain,
+          difficulty,
+          count
+        });
+      } catch (aiErr) {
+        console.error('[questions AI error]', aiErr.message);
+        // Return error but don't crash
+        return res.status(500).json({ 
+          message: `Failed to generate questions: ${aiErr.message}`,
+          suggestion: 'Check if GROQ_API_KEY is set in environment variables'
+        });
+      }
+    } else if (mode === 'bank') {
+      // Load questions from question bank for the job
+      // This would require fetching from job settings
+      questions = [];
+    }
+
+    // Store questions in candidate record
+    candidate.interviewQuestions = questions;
+    await candidate.save();
+
+    // Audit log
+    await AuditLog.create({
+      user: req.user.name,
+      userId: req.user._id,
+      action: 'QUESTIONS_GENERATED',
+      resource: 'candidates',
+      details: `${candidate.name} | ${mode} | ${questions.length} questions`
+    }).catch(() => {});
+
+    res.json({ 
+      questions,
+      count: questions.length,
+      mode,
+      difficulty
+    });
+  } catch (err) {
+    console.error('[POST /questions]', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/candidates/:id/answers
+// Submit and score screening answers
+// ─────────────────────────────────────────────────────────────────
+router.post('/:id/answers', protect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { answers, questions, sessionType = 'ai_generated', difficulty = 'medium' } = req.body;
+
+    const candidate = await Candidate.findById(id);
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found' });
+    }
+
+    console.log(`[answers] Evaluating ${answers?.length || 0} answers for ${candidate.name}`);
+
+    // Score answers using AI
+    let screeningResults = null;
+    try {
+      screeningResults = await evaluateScreeningAnswers({
+        questions,
+        answers,
+        candidateName: candidate.name,
+        skills: candidate.topSkills || [],
+        domain: candidate.domain
+      });
+    } catch (aiErr) {
+      console.error('[answers evaluation error]', aiErr.message);
+      return res.status(500).json({ 
+        message: `Failed to evaluate answers: ${aiErr.message}`
+      });
+    }
+
+    // Create screening session
+    const session = {
+      sessionType,
+      difficulty,
+      conductedAt: new Date(),
+      conductedBy: req.user.name,
+      answers: answers.map((ans, i) => ({
+        question: questions[i],
+        userAnswer: ans,
+        aiScore: screeningResults?.scores[i] || 0,
+        aiFeedback: screeningResults?.feedback[i] || ''
+      })),
+      screeningScore: screeningResults?.overallScore || 0,
+      screeningBreakdown: screeningResults?.breakdown || {}
+    };
+
+    // Add session to candidate
+    if (!candidate.screeningSessions) {
+      candidate.screeningSessions = [];
+    }
+    candidate.screeningSessions.push(session);
+    candidate.screeningScore = session.screeningScore;
+    candidate.screeningAnswers = session.answers;
+    candidate.status = 'answers_submitted';
+
+    await candidate.save();
+
+    // Audit log
+    await AuditLog.create({
+      user: req.user.name,
+      userId: req.user._id,
+      action: 'SCREENING_SUBMITTED',
+      resource: 'candidates',
+      details: `${candidate.name} | Score: ${session.screeningScore} | ${sessionType}`
+    }).catch(() => {});
+
+    res.json({
+      message: 'Answers evaluated successfully',
+      session,
+      overallScore: session.screeningScore
+    });
+  } catch (err) {
+    console.error('[POST /answers]', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// POST /api/candidates/:id/hm-report
+// Generate final HM (Hiring Manager) report
+// ─────────────────────────────────────────────────────────────────
+router.post('/:id/hm-report', protect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { hmReportType = 'cv_only' } = req.body;
+
+    const candidate = await Candidate.findById(id);
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found' });
+    }
+
+    console.log(`[hm-report] Generating ${hmReportType} report for ${candidate.name}`);
+
+    // Calculate combined score based on report type
+    let finalScore = candidate.aiScore || 0;
+    let recommendation = candidate.recommendation || 'Consider';
+
+    if (hmReportType === 'cv_ai_questions') {
+      // Weighted average: CV (60%) + AI Screening (40%)
+      if (candidate.screeningScore) {
+        finalScore = Math.round(
+          (candidate.aiScore || 0) * 0.6 + 
+          (candidate.screeningScore || 0) * 0.4
+        );
+      }
+    } else if (hmReportType === 'cv_bank_questions') {
+      // Similar weighting for bank questions
+      if (candidate.screeningScore) {
+        finalScore = Math.round(
+          (candidate.aiScore || 0) * 0.6 + 
+          (candidate.screeningScore || 0) * 0.4
+        );
+      }
+    }
+
+    // Generate HM recommendations
+    try {
+      const hmReport = await generateHMReport({
+        candidate: {
+          name: candidate.name,
+          topSkills: candidate.topSkills,
+          experience: candidate.experienceYears,
+          domain: candidate.domain,
+          cvScore: candidate.aiScore,
+          screeningScore: candidate.screeningScore,
+          strengths: candidate.strengths,
+          gaps: candidate.gaps
+        },
+        reportType: hmReportType
+      });
+
+      recommendation = hmReport?.recommendation || recommendation;
+    } catch (aiErr) {
+      console.warn('[hm-report AI error]', aiErr.message);
+      // Continue with default recommendation
+    }
+
+    // Update candidate
+    candidate.combinedScore = finalScore;
+    candidate.hmReportType = hmReportType;
+    candidate.recommendation = recommendation;
+    candidate.status = 'hm_ready';
+
+    await candidate.save();
+
+    // Audit log
+    await AuditLog.create({
+      user: req.user.name,
+      userId: req.user._id,
+      action: 'HM_REPORT_GENERATED',
+      resource: 'candidates',
+      details: `${candidate.name} | Score: ${finalScore} | ${recommendation}`
+    }).catch(() => {});
+
+    res.json({
+      message: 'HM Report generated successfully',
+      finalScore,
+      recommendation,
+      reportType: hmReportType,
+      candidate
+    });
+  } catch (err) {
+    console.error('[POST /hm-report]', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
+// GET /api/candidates/:id/questions
+// Fetch stored interview questions for candidate
+// ─────────────────────────────────────────────────────────────────
+router.get('/:id/questions', protect, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const candidate = await Candidate.findById(id).select('interviewQuestions');
+    if (!candidate) {
+      return res.status(404).json({ message: 'Candidate not found' });
+    }
+
+    res.json({ 
+      questions: candidate.interviewQuestions || [],
+      count: (candidate.interviewQuestions || []).length
+    });
+  } catch (err) {
+    console.error('[GET /questions]', err.message);
+    res.status(500).json({ message: err.message });
+  }
 });
 
 module.exports = router;

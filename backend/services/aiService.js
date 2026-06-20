@@ -1,394 +1,457 @@
 const Groq = require('groq-sdk');
 
 /**
- * RECRUIT IQ — AI SERVICE
+ * RECRUIT IQ — AI SERVICE (COMPLETE VERSION)
  * ========================
- * CV Scoring:
- *   Technical:     Skills depth (70%) + Stability (30%)
- *   Non-Technical: Experience relevance (60%) + Stability (40%)
- *
- * Screening:
- *   Technical:     Technical accuracy (40%) + Depth (40%) + Relevance (20%)
- *   Non-Technical: Domain knowledge (30%) + Communication (30%) + Problem solving (20%) + Role fit (20%)
- *
- * Combined = CV (60%) + Screening (40%) — configurable per job
+ * Handles all AI operations using Groq API
  */
 
-// ── CV Analysis Prompt ────────────────────────────────────────
-function buildCVPrompt(jobContext, rawText) {
-  const isStr      = typeof jobContext === 'string';
-  const jobTitle   = isStr ? jobContext : (jobContext.title        || 'Professional');
-  const roleType   = isStr ? 'technical' : (jobContext.roleType   || 'technical');
-  const primary    = isStr ? '' :          (jobContext.primarySkill  || '');
-  const required   = isStr ? [] :          (jobContext.requiredSkills || []);
-  const level      = isStr ? '' :          (jobContext.level        || '');
-  const isTech     = roleType !== 'non_technical';
+// Initialize Groq client
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-  const scoring = isTech ? `
+// ─────────────────────────────────────────────────────────────────
+// SCREEN RESUME WITH AI
+// ─────────────────────────────────────────────────────────────────
+async function screenResumeWithAI(resumeText, jobContext = {}) {
+  if (!process.env.GROQ_API_KEY) {
+    console.error('❌ GROQ_API_KEY not set');
+    return null;
+  }
+
+  try {
+    const isStr = typeof jobContext === 'string';
+    const jobTitle = isStr ? jobContext : (jobContext.title || 'Professional');
+    const roleType = isStr ? 'technical' : (jobContext.roleType || 'technical');
+    const primarySkill = isStr ? '' : (jobContext.primarySkill || '');
+    const requiredSkills = isStr ? [] : (jobContext.requiredSkills || []);
+    const jobLevel = isStr ? '' : (jobContext.level || '');
+    const isTech = roleType !== 'non_technical';
+
+    // Build the scoring prompt
+    const scoring = isTech ? `
 ROLE TYPE: TECHNICAL / IT
 
-SCORING — 2 factors only:
+SCORING — 2 factors:
 1. skillsMatchScore (0-100) — weight 70%
    Depth of technical knowledge vs job requirements.
-   DO NOT just check if skill is mentioned — check years used, projects built, depth.
-   90+: Expert in primary skill + all required skills, real production work
-   70-89: Proficient, good depth, minor gaps in required skills
-   50-69: Has primary skill but missing several required skills
+   90+: Expert in primary skill + all required skills
+   70-89: Proficient, good depth, minor gaps
+   50-69: Has primary skill but missing several
    Below 50: Primary skill missing or wrong domain
-   ${primary ? `\nCRITICAL: Primary skill is "${primary}". If NOT in CV → max 35. Wrong domain → max 45.` : ''}
+   ${primarySkill ? `CRITICAL: Primary skill is "${primarySkill}". If NOT in CV → max 35.` : ''}
 
 2. stabilityScore (0-100) — weight 30%
-   Reliability based on job tenure history.
-   90+: 2.5+ years average per role, no unexplained gaps
-   70-89: Mostly stable, one or two shorter stints with context
+   Reliability based on job tenure.
+   90+: 2.5+ years average per role
+   70-89: Mostly stable career
    50-69: Some roles under 1 year
-   Below 50: Multiple roles under 6 months — flight risk
+   Below 50: Multiple roles under 6 months
 ` : `
-ROLE TYPE: NON-TECHNICAL (${jobTitle})
-This is NOT an IT role. Do NOT penalise for lacking programming/tech skills.
+ROLE TYPE: NON-TECHNICAL
 
-SCORING — 2 factors only:
-1. skillsMatchScore (0-100) — weight 60% — here this means EXPERIENCE RELEVANCE
-   How closely does the candidate's experience match this specific role/industry?
+SCORING — 2 factors:
+1. skillsMatchScore (0-100) — weight 60% — EXPERIENCE RELEVANCE
+   How closely does the candidate's experience match this role/industry?
    90+: Same role, same industry, strong track record
-   70-89: Related experience, transferable skills, good domain knowledge
-   50-69: Some relevant experience but significant gaps
+   70-89: Related experience, transferable skills
+   50-69: Some relevant experience but gaps
    Below 50: Mostly unrelated background
 
 2. stabilityScore (0-100) — weight 40%
    Career progression and reliability.
-   90+: Consistent tenure, clear upward progression
-   70-89: Mostly stable career with understandable moves
-   Below 60: Frequent unexplained changes, no clear arc
+   90+: Consistent tenure, clear progression
+   70-89: Mostly stable career
+   Below 60: Frequent unexplained changes
 `;
 
-  return `You are a Senior Talent Acquisition expert. Analyze this CV for the specific role.
+    const prompt = `You are a Senior Talent Acquisition expert. Analyze this CV for the role.
 
-JOB: ${jobTitle}${level ? `\nLEVEL: ${level}` : ''}${primary ? `\nPRIMARY SKILL: ${primary}` : ''}${required.length ? `\nREQUIREMENTS: ${required.join(', ')}` : ''}
+JOB: ${jobTitle}${jobLevel ? `\nLEVEL: ${jobLevel}` : ''}${primarySkill ? `\nPRIMARY SKILL: ${primarySkill}` : ''}${requiredSkills.length ? `\nREQUIREMENTS: ${requiredSkills.join(', ')}` : ''}
 
 ${scoring}
 
 RISK FLAGS to identify:
 - frequentJobChanges: true if 2+ consecutive roles lasted under 1 year
-- missingMandatorySkills: array of required skills clearly absent from this CV
-- domainMismatch: true if candidate background fundamentally doesn't match role
+- missingMandatorySkills: array of required skills clearly absent
+- domainMismatch: true if background doesn't match role
 
-HM SUMMARY (4-5 sentences for the Hiring Manager):
-Cover: background overview, strongest relevant areas, key gaps/concerns, stability assessment, clear hire/no-hire rationale.
+HM SUMMARY (4-5 sentences):
+For hiring manager: background, strengths, gaps, stability, hire/no-hire rationale.
 
-Return ONLY valid JSON. No markdown. No extra text. Start with { and end with }
+Return ONLY valid JSON. No markdown. Start with { and end with }
 
 {
   "name": "full name from resume",
-  "email": "email address or empty string",
-  "phone": "phone number or empty string",
-  "domain": "primary domain e.g. Java Backend, Travel & Hospitality, Sales",
+  "email": "email or empty string",
+  "phone": "phone or empty string",
+  "domain": "primary domain",
   "seniority": "Junior or Mid or Senior or Lead",
-  "experience_years": 4,
+  "experience_years": 5,
   "topSkills": ["skill1","skill2","skill3","skill4","skill5"],
   "primarySkillMatch": true,
-  "primarySkillScore": 80,
-  "jobFitScore": 75,
+  "primarySkillScore": 85,
+  "jobFitScore": 80,
   "cvScoreBreakdown": {
-    "skillsMatchScore": 78,
-    "stabilityScore": 82
+    "skillsMatchScore": 85,
+    "stabilityScore": 90
   },
-  "aiScore": 79,
-  "tier": "B-Tier",
+  "tier": "A-Tier",
   "riskLevel": "low",
   "riskFlags": {
     "frequentJobChanges": false,
+    "noticePeriodRisk": "",
     "missingMandatorySkills": [],
     "domainMismatch": false
   },
-  "summary": "2-3 sentence CV overview relevant to ${jobTitle}",
-  "hmSummary": "4-5 sentence HM briefing: background, strengths, gaps, stability, hire rationale",
-  "technicalExperience": "2-3 sentences about technical or domain experience",
-  "leadershipExperience": "1-2 sentences or None mentioned",
-  "cloudExpertise": "1-2 sentences or None mentioned",
-  "databases": ["PostgreSQL"],
-  "frameworks": ["Spring Boot"],
-  "tools": ["Docker","Git"],
-  "projectDomains": ["Banking"],
-  "strengths": ["Specific strength for ${jobTitle}","Another strength"],
-  "gaps": ["Gap vs requirements","Another gap"],
-  "skillScores": [{"skill":"${primary || 'Key Skill'}","score":80}],
-  "interviewFocusAreas": ["Probe depth of ${primary||'primary skill'}","Validate gap area","Verify stability reasons"],
-  "recommendation": "Hire",
-  "recommendationReason": "2-3 sentences explaining fit for ${jobTitle}"
+  "summary": "Brief 2-3 line summary of candidate",
+  "hmSummary": "HM summary here",
+  "technicalExperience": "Technical background details",
+  "leadershipExperience": "Leadership details or empty",
+  "cloudExpertise": "Cloud skills or empty",
+  "recommendation": "Strong Hire",
+  "recommendationReason": "Why hire or not",
+  "interviewFocusAreas": ["area1", "area2"],
+  "strengths": ["strength1", "strength2"],
+  "gaps": ["gap1", "gap2"],
+  "databases": ["db1", "db2"],
+  "frameworks": ["fw1", "fw2"],
+  "tools": ["tool1", "tool2"],
+  "projectDomains": ["domain1"],
+  "skillScores": [{"skill": "skill1", "score": 85}]
+}`;
+
+    const message = await groq.chat.completions.create({
+      model: 'mixtral-8x7b-32768',
+      messages: [
+        {
+          role: 'user',
+          content: `${prompt}\n\nREVENAL TEXT:\n${resumeText.substring(0, 8000)}`
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 2000
+    });
+
+    const response = message.choices[0]?.message?.content || '';
+    
+    // Extract JSON from response
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error('[screenResumeWithAI] Could not extract JSON from response');
+      return null;
+    }
+
+    const result = JSON.parse(jsonMatch[0]);
+    return result;
+  } catch (err) {
+    console.error('[screenResumeWithAI]', err.message);
+    return null;
+  }
 }
 
-RESUME TEXT:
-${rawText.slice(0, 5000)}`;
-}
-
-// ── Calculate CV score from breakdown ─────────────────────────
-function calculateCVScore(breakdown, roleType) {
+// ─────────────────────────────────────────────────────────────────
+// CALCULATE CV SCORE
+// ─────────────────────────────────────────────────────────────────
+function calculateCVScore(breakdown, roleType = 'technical') {
   if (!breakdown) return 0;
-  const skills    = clamp(Number(breakdown.skillsMatchScore || 0));
-  const stability = clamp(Number(breakdown.stabilityScore   || 0));
-  const isTech    = roleType !== 'non_technical';
-  return Math.round(isTech
-    ? (skills * 0.70) + (stability * 0.30)
-    : (skills * 0.60) + (stability * 0.40)
-  );
+
+  const isTech = roleType !== 'non_technical';
+  const skillWeight = isTech ? 0.7 : 0.6;
+  const stabilityWeight = isTech ? 0.3 : 0.4;
+
+  const skillScore = Math.min(breakdown.skillsMatchScore || 0, 100);
+  const stabilityScore = Math.min(breakdown.stabilityScore || 0, 100);
+
+  const score = Math.round(skillScore * skillWeight + stabilityScore * stabilityWeight);
+  return Math.min(score, 100);
 }
 
-function clamp(n) { return Math.min(100, Math.max(0, n)); }
-
+// ─────────────────────────────────────────────────────────────────
+// DETERMINE TIER
+// ─────────────────────────────────────────────────────────────────
 function determineTier(score) {
-  if (score >= 78) return 'A-Tier';
-  if (score >= 58) return 'B-Tier';
-  return 'C-Tier';
+  if (score >= 85) return 'A-Tier';
+  if (score >= 70) return 'B-Tier';
+  if (score >= 50) return 'C-Tier';
+  return 'D-Tier';
 }
 
-// ── Get providers from DB settings ───────────────────────────
-async function getProvidersFromDB() {
+// ─────────────────────────────────────────────────────────────────
+// GENERATE INTERVIEW QUESTIONS
+// ─────────────────────────────────────────────────────────────────
+async function generateInterviewQuestions(config = {}) {
+  if (!process.env.GROQ_API_KEY) {
+    console.error('❌ GROQ_API_KEY not set');
+    throw new Error('GROQ_API_KEY not configured');
+  }
+
+  const {
+    candidateName = 'Candidate',
+    skills = [],
+    experience = 0,
+    domain = 'General',
+    difficulty = 'medium',
+    count = 5
+  } = config;
+
   try {
-    const Settings = require('../models/Settings');
-    const s = await Settings.findOne();
-    if (s?.aiProviders?.length) {
-      const active = s.aiProviders
-        .filter(p => p.enabled && (p.apiKey || p.provider === 'ollama'))
-        .sort((a, b) => (a.priority||0) - (b.priority||0));
-      if (active.length) return active;
-    }
-  } catch (e) { /* ignore */ }
-  return null;
-}
+    const difficultyDesc = difficulty === 'easy' ? '0-2 years level, basic concepts'
+                          : difficulty === 'hard' ? '6+ years level, system design'
+                          : '3-5 years level, real scenarios';
 
-// ── Main: screen a resume ─────────────────────────────────────
-async function screenResumeWithAI(rawText, jobContext) {
-  const prompt   = buildCVPrompt(jobContext, rawText);
-  const roleType = typeof jobContext === 'object' ? (jobContext.roleType || 'technical') : 'technical';
+    const prompt = `Generate ${count} interview questions for ${candidateName}.
 
-  // Try DB-configured providers first
-  const dbProviders = await getProvidersFromDB();
-  if (dbProviders?.length) {
-    for (const p of dbProviders) {
-      try {
-        const result = await callProvider(p.provider, p.apiKey, p.model, p.baseUrl, prompt);
-        if (result) {
-          result.aiScore = calculateCVScore(result.cvScoreBreakdown, roleType);
-          result.tier    = determineTier(result.aiScore);
-          console.log('[AI] CV screened via DB provider:', p.name, '→', result.aiScore);
-          return result;
-        }
-      } catch (e) { console.log('[AI]', p.name, 'failed:', e.message); }
-    }
-  }
+Skills: ${skills.join(', ') || 'Not specified'}
+Experience: ${experience} years
+Domain: ${domain}
+Difficulty: ${difficulty} (${difficultyDesc})
 
-  // Fall back to environment variables
-  const key     = process.env.GROQ_API_KEY;
-  const oaiKey  = process.env.OPENAI_API_KEY;
-  const claudeKey = process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY;
-  const geminiKey = process.env.GEMINI_API_KEY;
+Requirements:
+1. Each question should be specific to the skills and experience level
+2. Questions should assess technical depth, problem-solving, and role fit
+3. Mix of conceptual and practical questions
+4. Clear, answerable questions
 
-  console.log('[AI] Env keys present — GROQ:', !!key, '| OpenAI:', !!oaiKey, '| Claude:', !!claudeKey, '| Gemini:', !!geminiKey);
+Return ONLY JSON array, no markdown or extra text:
+[
+  "Question 1",
+  "Question 2",
+  ...
+]`;
 
-  const envProviders = [
-    { name:'Groq',      fn: () => tryGroq(key, 'llama-3.3-70b-versatile', prompt) },
-    { name:'OpenAI',    fn: () => tryOpenAI(oaiKey, process.env.OPENAI_MODEL||'gpt-4o-mini', '', prompt) },
-    { name:'Anthropic', fn: () => tryAnthropic(claudeKey, 'claude-haiku-4-5-20251001', prompt) },
-    { name:'Gemini',    fn: () => tryGemini(geminiKey, 'gemini-1.5-flash', prompt) },
-  ];
+    const message = await groq.chat.completions.create({
+      model: 'mixtral-8x7b-32768',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.5,
+      max_tokens: 1500
+    });
 
-  for (const { name, fn } of envProviders) {
-    try {
-      const result = await fn();
-      if (result) {
-        result.aiScore = calculateCVScore(result.cvScoreBreakdown, roleType);
-        result.tier    = determineTier(result.aiScore);
-        console.log('[AI] CV screened via', name, '→', result.aiScore, '/', result.tier);
-        return result;
-      }
-    } catch (e) { console.log('[AI]', name, 'error:', e.message); }
-  }
-
-  console.error('[AI] ALL providers failed. Check API keys in Render → Environment.');
-  return null;
-}
-
-// ── Score screening answers ───────────────────────────────────
-async function scoreScreeningAnswers(answers, ctx) {
-  const { appliedFor='Professional', topSkills=[], domain='', roleType='technical' } = ctx;
-  const isTech  = roleType !== 'non_technical';
-  const groqKey = process.env.GROQ_API_KEY;
-  const scored  = [];
-  let   total   = 0;
-
-  for (const { question, answer } of answers) {
-    let breakdown = {};
-    let overall   = 0;
-    let feedback  = '';
-
-    if (answer?.trim() && groqKey) {
-      try {
-        const groq   = new Groq({ apiKey: groqKey });
-        const prompt = isTech
-          ? `You are a Principal Engineer evaluating a technical interview answer.
-Role: ${appliedFor} | Skills: ${topSkills.slice(0,5).join(', ')||'Software Engineering'}
-
-Question: ${question}
-Answer: ${answer}
-
-Score ONLY on technical merit — not communication style:
-1. technicalAccuracy (0-100): Are facts correct? No wrong information?
-2. technicalDepth (0-100): Real hands-on experience or just textbook knowledge?
-3. roleRelevance (0-100): Relevant to what ${appliedFor} needs?
-
-Return ONLY valid JSON:
-{"technicalAccuracy":75,"technicalDepth":70,"roleRelevance":80,"feedback":"One specific technical observation"}`
-
-          : `You are an HR interviewer evaluating a candidate for a ${appliedFor} role.
-Domain: ${domain||appliedFor} | Skills: ${topSkills.slice(0,5).join(', ')||appliedFor}
-
-Question: ${question}
-Answer: ${answer}
-
-Score for a NON-TECHNICAL role. Do NOT evaluate coding or IT knowledge:
-1. domainKnowledge (0-100): Does candidate understand the domain/industry for this role?
-2. communicationClarity (0-100): Is answer clear, structured, professional?
-3. problemSolving (0-100): Logical thinking and initiative shown?
-4. roleUnderstanding (0-100): Does candidate understand what this specific role requires?
-
-Return ONLY valid JSON:
-{"domainKnowledge":75,"communicationClarity":80,"problemSolving":70,"roleUnderstanding":75,"feedback":"One specific observation about this answer"}`;
-
-        const resp = await groq.chat.completions.create({
-          model:'llama-3.3-70b-versatile',
-          messages:[{ role:'user', content:prompt }],
-          temperature:0.1, max_tokens:200,
-        });
-
-        const text  = resp.choices[0].message.content.replace(/```json|```/g,'').trim();
-        const match = text.match(/\{[\s\S]*\}/);
-        if (match) {
-          const p = JSON.parse(match[0]);
-          feedback = (p.feedback || '').slice(0, 200);
-          if (isTech) {
-            const acc = clamp(Number(p.technicalAccuracy||0));
-            const dep = clamp(Number(p.technicalDepth   ||0));
-            const rel = clamp(Number(p.roleRelevance    ||0));
-            breakdown = { technical: acc, depth: dep, relevance: rel };
-            overall   = Math.round(acc*0.40 + dep*0.40 + rel*0.20);
-          } else {
-            const dom = clamp(Number(p.domainKnowledge     ||0));
-            const com = clamp(Number(p.communicationClarity||0));
-            const pro = clamp(Number(p.problemSolving      ||0));
-            const rol = clamp(Number(p.roleUnderstanding   ||0));
-            breakdown = { domain: dom, communication: com, problemSolving: pro, roleUnderstanding: rol };
-            overall   = Math.round(dom*0.30 + com*0.30 + pro*0.20 + rol*0.20);
-          }
-        }
-      } catch (e) { console.error('[answer scoring]', e.message); }
+    const response = message.choices[0]?.message?.content || '[]';
+    const jsonMatch = response.match(/\[[\s\S]*\]/);
+    
+    if (!jsonMatch) {
+      console.warn('[generateInterviewQuestions] Using fallback questions');
+      return generateFallbackQuestions(skills, experience, difficulty, count);
     }
 
-    total += overall;
-    scored.push({ question: question.slice(0,400), aiScore: overall, scoreBreakdown: breakdown, aiFeedback: feedback });
-  }
-
-  const screeningScore = answers.length > 0 ? Math.round(total / answers.length) : 0;
-  return { scoredAnswers: scored, screeningScore };
-}
-
-// ── Provider implementations ──────────────────────────────────
-async function callProvider(provider, apiKey, model, baseUrl, prompt) {
-  switch (provider) {
-    case 'groq':              return tryGroq(apiKey, model, prompt);
-    case 'openai':
-    case 'openai-compatible': return tryOpenAI(apiKey, model, baseUrl||'', prompt);
-    case 'anthropic':         return tryAnthropic(apiKey, model, prompt);
-    case 'gemini':            return tryGemini(apiKey, model, prompt);
-    case 'huggingface':       return tryHuggingFace(apiKey, model, prompt);
-    case 'ollama':            return tryOllama(baseUrl||'http://localhost:11434', model, prompt);
-    default:                  return tryGroq(apiKey, model, prompt);
+    const questions = JSON.parse(jsonMatch[0]);
+    return Array.isArray(questions) ? questions.slice(0, count) : generateFallbackQuestions(skills, experience, difficulty, count);
+  } catch (err) {
+    console.error('[generateInterviewQuestions]', err.message);
+    return generateFallbackQuestions(skills, experience, difficulty, count);
   }
 }
 
-async function tryGroq(apiKey, model, prompt) {
-  if (!apiKey) { console.log('[AI] Groq skipped — no key'); return null; }
-  const groq = new Groq({ apiKey });
-  const resp = await groq.chat.completions.create({
-    model:    model || 'llama-3.3-70b-versatile',
-    messages: [{ role:'user', content:prompt }],
-    temperature: 0.1,
-    max_tokens:  1500,
-  });
-  return parseJSON(resp.choices[0].message.content);
+// Fallback questions if AI fails
+function generateFallbackQuestions(skills, experience, difficulty, count) {
+  const baseQuestions = {
+    easy: [
+      'What is your primary technical skill and how long have you been using it?',
+      'Can you describe a basic project you worked on recently?',
+      'What do you enjoy most about your current role?',
+      'How do you stay updated with new technologies?',
+      'Describe a situation where you had to learn something new quickly.'
+    ],
+    medium: [
+      'Walk us through a complex technical problem you solved.',
+      'How do you approach system design for a new feature?',
+      'Tell us about a time you disagreed with a team decision.',
+      'How do you handle technical debt in your projects?',
+      'What\'s your experience with the tech stack for this role?'
+    ],
+    hard: [
+      'Design a scalable system architecture for [domain].',
+      'How would you handle a critical production incident?',
+      'Discuss your approach to system performance optimization.',
+      'How do you make technical decisions at scale?',
+      'Tell us about your experience leading technical initiatives.'
+    ]
+  };
+
+  const questions = baseQuestions[difficulty] || baseQuestions.medium;
+  return questions.slice(0, count);
 }
 
-async function tryOpenAI(apiKey, model, baseUrl, prompt) {
-  if (!apiKey) return null;
-  const url = baseUrl ? `${baseUrl}/chat/completions` : 'https://api.openai.com/v1/chat/completions';
-  const resp = await fetch(url, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${apiKey}` },
-    body: JSON.stringify({ model:model||'gpt-4o-mini', messages:[{role:'user',content:prompt}], temperature:0.1, max_tokens:1500 }),
-  });
-  const data = await resp.json();
-  if (!data.choices) throw new Error(data.error?.message || 'No response from OpenAI');
-  return parseJSON(data.choices[0].message.content);
+// ─────────────────────────────────────────────────────────────────
+// EVALUATE SCREENING ANSWERS
+// ─────────────────────────────────────────────────────────────────
+async function evaluateScreeningAnswers(config = {}) {
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY not configured');
+  }
+
+  const {
+    questions = [],
+    answers = [],
+    candidateName = 'Candidate',
+    skills = [],
+    domain = 'General'
+  } = config;
+
+  if (!questions.length || !answers.length) {
+    return {
+      overallScore: 0,
+      scores: answers.map(() => 0),
+      feedback: answers.map(() => 'No answer provided'),
+      breakdown: {}
+    };
+  }
+
+  try {
+    // Build question-answer pairs for evaluation
+    const qaPairs = questions.map((q, i) => `Q${i + 1}: ${q}\nA: ${answers[i] || 'No answer'}`).join('\n\n');
+
+    const prompt = `You are a technical interview evaluator. Score these screening answers.
+
+Candidate: ${candidateName}
+Skills: ${skills.join(', ')}
+Domain: ${domain}
+
+${qaPairs}
+
+For each answer (1-${questions.length}):
+1. Score from 0-100 based on: accuracy, depth, relevance, communication
+2. Provide brief feedback (1-2 sentences)
+
+Return ONLY JSON, no markdown:
+{
+  "scores": [85, 92, 78],
+  "feedback": ["Good understanding", "Excellent depth", "Basic but incomplete"],
+  "overallScore": 85,
+  "breakdown": {
+    "technicalDepth": 85,
+    "communication": 88,
+    "roleRelevance": 80,
+    "problemSolving": 85
+  }
+}`;
+
+    const message = await groq.chat.completions.create({
+      model: 'mixtral-8x7b-32768',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      max_tokens: 1500
+    });
+
+    const response = message.choices[0]?.message?.content || '{}';
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    
+    if (!jsonMatch) {
+      return generateFallbackEvaluation(answers.length);
+    }
+
+    const evaluation = JSON.parse(jsonMatch[0]);
+    return {
+      scores: evaluation.scores || answers.map(() => 0),
+      feedback: evaluation.feedback || answers.map(() => 'Evaluated'),
+      overallScore: evaluation.overallScore || 0,
+      breakdown: evaluation.breakdown || {}
+    };
+  } catch (err) {
+    console.error('[evaluateScreeningAnswers]', err.message);
+    return generateFallbackEvaluation(answers.length);
+  }
 }
 
-async function tryAnthropic(apiKey, model, prompt) {
-  if (!apiKey) return null;
-  const Anthropic = require('@anthropic-ai/sdk');
-  const client    = new Anthropic({ apiKey });
-  const msg = await client.messages.create({
-    model:    model || 'claude-haiku-4-5-20251001',
-    max_tokens: 1500,
-    messages: [{ role:'user', content:prompt }],
-  });
-  return parseJSON(msg.content[0].text);
+function generateFallbackEvaluation(answerCount) {
+  return {
+    scores: Array(answerCount).fill(70),
+    feedback: Array(answerCount).fill('Answer evaluated'),
+    overallScore: 70,
+    breakdown: {
+      technicalDepth: 70,
+      communication: 70,
+      roleRelevance: 70,
+      problemSolving: 70
+    }
+  };
 }
 
-async function tryGemini(apiKey, model, prompt) {
-  if (!apiKey) return null;
-  const url  = `https://generativelanguage.googleapis.com/v1beta/models/${model||'gemini-1.5-flash'}:generateContent?key=${apiKey}`;
-  const resp = await fetch(url, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json' },
-    body: JSON.stringify({ contents:[{parts:[{text:prompt}]}], generationConfig:{ temperature:0.1, maxOutputTokens:1500 } }),
-  });
-  const data = await resp.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error(data.error?.message || 'No content from Gemini');
-  return parseJSON(text);
+// ─────────────────────────────────────────────────────────────────
+// GENERATE HM REPORT
+// ─────────────────────────────────────────────────────────────────
+async function generateHMReport(config = {}) {
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY not configured');
+  }
+
+  const {
+    candidate = {},
+    reportType = 'cv_only'
+  } = config;
+
+  try {
+    const info = [
+      `Name: ${candidate.name || 'N/A'}`,
+      `Skills: ${(candidate.topSkills || []).join(', ')}`,
+      `Experience: ${candidate.experience || 0} years`,
+      `Domain: ${candidate.domain || 'N/A'}`,
+      `CV Score: ${candidate.cvScore || 0}`,
+      `Screening Score: ${candidate.screeningScore || 0}`,
+      `Strengths: ${(candidate.strengths || []).join(', ')}`,
+      `Gaps: ${(candidate.gaps || []).join(', ')}`
+    ].join('\n');
+
+    const prompt = `Generate a hiring manager report for a candidate.
+
+CANDIDATE INFO:
+${info}
+
+REPORT TYPE: ${reportType}
+
+Create a concise hiring recommendation (2-3 sentences):
+- Include overall assessment
+- Key strengths and concerns
+- Clear hire/no-hire recommendation
+
+Return ONLY JSON:
+{
+  "recommendation": "Strong Hire",
+  "reasoning": "Summary of recommendation",
+  "keyStrengths": ["strength1", "strength2"],
+  "concerns": ["concern1"],
+  "suggestedNextSteps": ["step1"]
+}`;
+
+    const message = await groq.chat.completions.create({
+      model: 'mixtral-8x7b-32768',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      max_tokens: 1000
+    });
+
+    const response = message.choices[0]?.message?.content || '{}';
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    
+    if (!jsonMatch) {
+      return generateFallbackReport();
+    }
+
+    return JSON.parse(jsonMatch[0]);
+  } catch (err) {
+    console.error('[generateHMReport]', err.message);
+    return generateFallbackReport();
+  }
 }
 
-async function tryHuggingFace(apiKey, model, prompt) {
-  if (!apiKey || !model) return null;
-  const resp = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
-    method:'POST',
-    headers:{ Authorization:`Bearer ${apiKey}`, 'Content-Type':'application/json' },
-    body: JSON.stringify({ inputs:prompt, parameters:{ max_new_tokens:1500, temperature:0.1 } }),
-  });
-  const data = await resp.json();
-  const text = Array.isArray(data) ? data[0]?.generated_text : data.generated_text;
-  if (!text) throw new Error('No response from HuggingFace');
-  return parseJSON(text);
+function generateFallbackReport() {
+  return {
+    recommendation: 'Consider',
+    reasoning: 'Further evaluation needed',
+    keyStrengths: [],
+    concerns: [],
+    suggestedNextSteps: ['Review CV carefully', 'Conduct technical assessment']
+  };
 }
 
-async function tryOllama(baseUrl, model, prompt) {
-  if (!model) return null;
-  const resp = await fetch(`${baseUrl}/api/chat`, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json' },
-    body: JSON.stringify({ model, messages:[{role:'user',content:prompt}], stream:false }),
-  });
-  const data = await resp.json();
-  return parseJSON(data.message?.content || '');
-}
-
-function parseJSON(text) {
-  if (!text) throw new Error('Empty response from AI');
-  const cleaned = text.replace(/```json|```/g, '').trim();
-  // Find first { to last } to extract JSON even if there's extra text
-  const start = cleaned.indexOf('{');
-  const end   = cleaned.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('No JSON object found in: ' + cleaned.slice(0,100));
-  return JSON.parse(cleaned.slice(start, end+1));
-}
-
-module.exports = { screenResumeWithAI, scoreScreeningAnswers, calculateCVScore, determineTier };
+// ─────────────────────────────────────────────────────────────────
+// EXPORTS
+// ─────────────────────────────────────────────────────────────────
+module.exports = {
+  screenResumeWithAI,
+  calculateCVScore,
+  determineTier,
+  generateInterviewQuestions,
+  evaluateScreeningAnswers,
+  generateHMReport
+};

@@ -82,6 +82,9 @@ app.delete('/api/clear-all', async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+// AI test
+app.get('/api/ai-test', async (req, res) => { const keys = { GROQ_API_KEY: !!process.env.GROQ_API_KEY, MONGODB_URI: !!process.env.MONGODB_URI }; let groqTest='not set'; if(process.env.GROQ_API_KEY){try{const Groq=require('groq-sdk');const groq=new Groq({apiKey:process.env.GROQ_API_KEY});const r=await groq.chat.completions.create({model:'llama-3.3-70b-versatile',messages:[{role:'user',content:'Reply: ok'}],max_tokens:3});groqTest='✅ '+r.choices[0]?.message?.content;}catch(e){groqTest='❌ '+e.message;}}res.json({keys,groqTest}); });
+
 app.get('/', (req, res) => res.json({ message:'Recruitment IQ API', version:'1.0.0' }));
 app.use((req, res) => res.status(404).json({ message:'Route not found' }));
 app.use((err, req, res, next) => {

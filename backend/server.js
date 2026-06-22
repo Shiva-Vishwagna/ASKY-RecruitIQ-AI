@@ -3,18 +3,84 @@ const mongoose = require('mongoose');
 const cors     = require('cors');
 const helmet   = require('helmet');
 const morgan   = require('morgan');
+const rateLimit = require('express-rate-limit');
+const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
 // ============================================================
-// ⭐ NEW: MULTI-AI IMPORTS
+// ⭐ UPDATED: SECURITY & CONFIG IMPORTS
 // ============================================================
 const { analyzeWithFallback, getHealthStatus } = require('./services/multiAiService');
 const { getConfiguredProviders } = require('./services/multiAiProviders');
+const { verifyJWT } = require('./middleware/auth'); // ⭐ NEW
+
+// ============================================================
+// ⭐ CONSTANTS & UTILITIES
+// ============================================================
+
+const RESPONSE_CODES = {
+  SUCCESS: 200,
+  CREATED: 201,
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  RATE_LIMITED: 429,
+  SERVER_ERROR: 500,
+  SERVICE_UNAVAILABLE: 503
+};
+
+// Response utility functions ⭐ NEW
+const sendResponse = (res, statusCode, data) => {
+  res.status(statusCode).json({
+    ...data,
+    timestamp: new Date().toISOString(),
+    requestId: res.locals.requestId
+  });
+};
+
+const sendError = (res, statusCode, message, details = null) => {
+  sendResponse(res, statusCode, {
+    success: false,
+    error: message,
+    ...(process.env.NODE_ENV === 'development' && details && { details })
+  });
+};
+
+// ============================================================
+// ⭐ ENVIRONMENT VALIDATION
+// ============================================================
+
+function validateEnvironment() {
+  const required = ['MONGODB_URI', 'JWT_SECRET'];
+  const missing = required.filter(env => !process.env[env]);
+  
+  if (missing.length > 0) {
+    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+  }
+
+  console.log('✅ Environment validation passed');
+}
+
+// ============================================================
+// ⭐ INITIALIZE EXPRESS APP
+// ============================================================
 
 const app = express();
 
 // ─────────────────────────────────────────────────────────────────
-// MIDDLEWARE
+// REQUEST ID MIDDLEWARE ⭐ NEW
+// ─────────────────────────────────────────────────────────────────
+
+app.use((req, res, next) => {
+  res.locals.requestId = uuidv4();
+  console.log(`[${res.locals.requestId}] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+// ─────────────────────────────────────────────────────────────────
+// SECURITY MIDDLEWARE
 // ─────────────────────────────────────────────────────────────────
 
 app.use(helmet());
@@ -22,10 +88,28 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// ⭐ NEW: RATE LIMITING
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5, // Stricter for sensitive endpoints
+  message: 'Too many requests to this endpoint',
+});
+
+app.use(limiter);
+
 // ─────────────────────────────────────────────────────────────────
-// CORS CONFIGURATION
+// CORS CONFIGURATION ⭐ UPDATED - MORE RESTRICTIVE
 // ─────────────────────────────────────────────────────────────────
 
+// ⭐ FIXED: Specific domain whitelist instead of wildcards
 const allowedOrigins = [
   process.env.FRONTEND_URL || 'https://asky-recruit-iq-ai.vercel.app',
   'http://localhost:3000',
@@ -39,28 +123,24 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    // Check if origin is in whitelist
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    
-    // Allow all Vercel.app domains
-    if (origin && origin.includes('.vercel.app')) return callback(null, true);
-    
-    // Allow all localhost variants
-    if (origin && origin.includes('localhost')) return callback(null, true);
-    if (origin && origin.includes('127.0.0.1')) return callback(null, true);
+    // Only check exact whitelist - no wildcard includes
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
     
     // Reject everything else
-    console.warn(`[CORS] Rejected origin: ${origin}`);
-    callback(new Error('Not allowed by CORS'));
+    console.warn(`[CORS BLOCKED] Origin: ${origin}`);
+    callback(new Error(`CORS policy: Origin ${origin} not allowed`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
+  maxAge: 600 // Cache CORS check for 10 minutes
 }));
 
 // ─────────────────────────────────────────────────────────────────
-// DATABASE CONNECTION
+// DATABASE CONNECTION ⭐ IMPROVED
 // ─────────────────────────────────────────────────────────────────
 
 async function connectDB() {
@@ -71,38 +151,73 @@ async function connectDB() {
       throw new Error('MONGODB_URI is not set in environment variables');
     }
 
+    // ⭐ NEW: Better connection options
     await mongoose.connect(mongoUri, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 5000, // 5 seconds
+      socketTimeoutMS: 45000,
     });
 
-    console.log('✅ MongoDB connected');
+    console.log('✅ MongoDB connected successfully');
+    return true;
+  } catch (err) {
+    console.error('❌ MongoDB connection error:', err.message);
+    // ⭐ FIXED: Give time to retry instead of failing immediately
+    console.warn('⚠️  Retrying connection in 5 seconds...');
+    setTimeout(connectDB, 5000);
+    return false;
+  }
+}
+
+// ⭐ NEW: Ensure DB is connected before starting server
+let dbConnected = false;
+
+async function startServer() {
+  try {
+    validateEnvironment();
+    dbConnected = await connectDB();
     
+    // Optional: Wait for DB if critical
+    let retries = 0;
+    while (!dbConnected && retries < 5) {
+      console.log(`Waiting for database connection... (${retries + 1}/5)`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      dbConnected = mongoose.connection.readyState === 1;
+      retries++;
+    }
+
+    if (!dbConnected) {
+      console.warn('⚠️  Database not connected. Starting server anyway (non-blocking mode)');
+    }
+
     // Auto-seed admin on first run
     try {
       const User = require('./models/User');
       const count = await User.countDocuments();
       if (count === 0) {
+        // ⭐ FIXED: Properly hash password
+        const bcrypt = require('bcryptjs');
+        const hashedPassword = await bcrypt.hash('Admin@1234', 10);
+        
         await User.create({
           name: 'Admin',
           email: 'admin@recruitiq.com',
-          password: 'Admin@1234',
+          password: hashedPassword, // ⭐ FIXED: Hashed, not plaintext
           role: 'admin',
           isActive: true
         });
         console.log('✅ Admin created: admin@recruitiq.com / Admin@1234');
+        console.log('⚠️  CHANGE THIS PASSWORD IMMEDIATELY after first login!');
       }
     } catch (seedErr) {
       console.warn('⚠️  Seed skipped:', seedErr.message);
     }
   } catch (err) {
-    console.error('❌ MongoDB connection error:', err.message);
-    // Don't exit - let Render handle crashes
+    console.error('❌ Failed to start server:', err.message);
+    process.exit(1);
   }
 }
-
-// Connect to database
-connectDB();
 
 // ─────────────────────────────────────────────────────────────────
 // CORE ROUTES (Always Present)
@@ -131,77 +246,88 @@ for (const { path, file } of optionalRoutes) {
     app.use(path, require(file));
     console.log(`✅ Optional route loaded: ${path}`);
   } catch (e) {
+    // ⭐ IMPROVED: Log actual error in dev mode
     console.log(`⚠️  Optional route not found (skipped): ${path}`);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`   Error details: ${e.message}`);
+    }
   }
 }
 
 // ============================================================
-// ⭐ NEW: MULTI-AI HEALTH ENDPOINT
+// ⭐ MULTI-AI HEALTH ENDPOINT
 // ============================================================
 
 app.get('/api/ai-health', (req, res) => {
   try {
     const health = getHealthStatus(process.env);
-    res.json({
+    sendResponse(res, RESPONSE_CODES.SUCCESS, {
+      success: true,
       status: health.status,
       providers: health.providers,
       available: health.available,
-      timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    res.status(500).json({
-      status: 'error',
-      message: err.message,
-      timestamp: new Date().toISOString(),
-    });
+    console.error(`[${res.locals.requestId}] AI health check error:`, err.message);
+    sendError(res, RESPONSE_CODES.SERVER_ERROR, 'Failed to check AI health', err.message);
   }
 });
 
 // ============================================================
-// ⭐ NEW: MULTI-AI ANALYSIS ENDPOINT
+// ⭐ MULTI-AI ANALYSIS ENDPOINT ⭐ IMPROVED
 // ============================================================
 
 app.post('/api/analyze', async (req, res) => {
   try {
     const { content } = req.body;
     
-    // Validate input
-    if (!content || typeof content !== 'string' || content.trim().length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Content is required and must be a non-empty string',
-      });
+    // ⭐ IMPROVED: Better validation
+    if (!content) {
+      return sendError(res, RESPONSE_CODES.BAD_REQUEST, 'Content is required');
+    }
+    
+    if (typeof content !== 'string') {
+      return sendError(res, RESPONSE_CODES.BAD_REQUEST, 'Content must be a string');
+    }
+    
+    if (content.trim().length === 0) {
+      return sendError(res, RESPONSE_CODES.BAD_REQUEST, 'Content cannot be empty');
     }
 
-    // Call multi-AI service with fallback
-    console.log(`[ANALYZE] Processing content (${content.length} chars)...`);
-    const result = await analyzeWithFallback(content, process.env, console);
+    // ⭐ NEW: Max length validation to prevent DoS
+    const MAX_CONTENT_LENGTH = 50000; // 50KB
+    if (content.length > MAX_CONTENT_LENGTH) {
+      return sendError(res, RESPONSE_CODES.BAD_REQUEST, 
+        `Content exceeds maximum length of ${MAX_CONTENT_LENGTH} characters`);
+    }
+
+    console.log(`[${res.locals.requestId}] [ANALYZE] Processing content (${content.length} chars)...`);
+    
+    // ⭐ NEW: Add timeout for external API calls
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Analysis timeout')), 30000) // 30 seconds
+    );
+
+    const result = await Promise.race([
+      analyzeWithFallback(content, process.env, console),
+      timeoutPromise
+    ]);
     
     if (result.success) {
-      res.json({
+      sendResponse(res, RESPONSE_CODES.SUCCESS, {
         success: true,
         analysis: result.analysis,
-        provider: result.provider, // Shows which AI provider was used
-        timestamp: new Date().toISOString(),
+        provider: result.provider,
       });
     } else {
-      // All providers failed
-      res.status(503).json({
-        success: false,
-        error: result.error,
-        message: result.message || 'All AI providers failed',
-        tried: result.tried || [],
-        timestamp: new Date().toISOString(),
-      });
+      sendError(res, RESPONSE_CODES.SERVICE_UNAVAILABLE,
+        'All AI providers failed',
+        { tried: result.tried || [] }
+      );
     }
   } catch (err) {
-    console.error('[ANALYZE ERROR]', err);
-    res.status(500).json({
-      success: false,
-      error: 'Analysis failed',
-      message: err.message,
-      timestamp: new Date().toISOString(),
-    });
+    console.error(`[${res.locals.requestId}] [ANALYZE ERROR]`, err.message);
+    sendError(res, RESPONSE_CODES.SERVER_ERROR, 'Analysis failed');
   }
 });
 
@@ -211,28 +337,24 @@ app.post('/api/analyze', async (req, res) => {
 
 app.get('/api/health', (req, res) => {
   const status = {
+    success: true,
     status: 'ok',
-    db: mongoose.connection.readyState === 1 ? 1 : 0,
-    timestamp: new Date().toISOString(),
-    env: {
-      // ⭐ NEW: Show AI provider configuration
-      anthropic_api_key: !!process.env.ANTHROPIC_API_KEY,
-      groq_api_key: !!process.env.GROQ_API_KEY,
-      huggingface_api_key: !!process.env.HUGGINGFACE_API_KEY,
-      cohere_api_key: !!process.env.COHERE_API_KEY,
-      mistral_api_key: !!process.env.MISTRAL_API_KEY,
-      // Existing config
-      mongodb_uri: !!process.env.MONGODB_URI,
-      frontend_url: process.env.FRONTEND_URL || 'not set',
-      jwt_secret: !!process.env.JWT_SECRET
+    db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    environment: process.env.NODE_ENV || 'development',
+    aiProviders: {
+      anthropic: !!process.env.ANTHROPIC_API_KEY,
+      groq: !!process.env.GROQ_API_KEY,
+      huggingface: !!process.env.HUGGINGFACE_API_KEY,
+      cohere: !!process.env.COHERE_API_KEY,
+      mistral: !!process.env.MISTRAL_API_KEY,
     }
   };
   
-  res.json(status);
+  sendResponse(res, RESPONSE_CODES.SUCCESS, status);
 });
 
 // ─────────────────────────────────────────────────────────────────
-// GROQ API TEST ENDPOINT
+// AI TEST ENDPOINT ⭐ IMPROVED
 // ─────────────────────────────────────────────────────────────────
 
 app.get('/api/ai-test', async (req, res) => {
@@ -248,19 +370,23 @@ app.get('/api/ai-test', async (req, res) => {
       FRONTEND_URL: process.env.FRONTEND_URL || 'not set'
     };
 
-    // ⭐ NEW: Test multi-AI system
+    // Test multi-AI system
     let multiAiTest = 'not configured';
     if (Object.values(envStatus).some((v, i) => i < 5 && v)) {
       try {
         const health = getHealthStatus(process.env);
-        multiAiTest = `Available: ${health.available.join(', ') || 'none'}`;
+        multiAiTest = health.available.length > 0 
+          ? `Available: ${health.available.join(', ')}`
+          : 'No providers available';
       } catch (aiErr) {
-        multiAiTest = `Error: ${aiErr.message.substring(0, 50)}`;
+        // ⭐ FIXED: Don't expose error details
+        multiAiTest = 'Error checking availability';
+        console.error(`[${res.locals.requestId}] AI check error:`, aiErr.message);
       }
     }
 
-    // Existing Groq test
-    let groqTest = 'not set';
+    // Groq test
+    let groqTest = 'not configured';
     
     if (process.env.GROQ_API_KEY) {
       try {
@@ -273,35 +399,35 @@ app.get('/api/ai-test', async (req, res) => {
           max_tokens: 5
         });
         
-        const content = response.choices[0]?.message?.content || '';
-        groqTest = `✅ Connected: ${content.substring(0, 20)}`;
+        groqTest = `✅ Connected`;
       } catch (groqErr) {
-        groqTest = `❌ Error: ${groqErr.message.substring(0, 50)}`;
+        groqTest = `❌ Connection failed`;
+        console.error(`[${res.locals.requestId}] Groq error:`, groqErr.message);
       }
     }
 
-    res.json({
+    sendResponse(res, RESPONSE_CODES.SUCCESS, {
+      success: true,
       environment: envStatus,
       multiAiSystem: multiAiTest,
       groq: groqTest,
-      db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-      timestamp: new Date().toISOString()
+      database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(`[${res.locals.requestId}] AI test error:`, err.message);
+    sendError(res, RESPONSE_CODES.SERVER_ERROR, 'AI test failed');
   }
 });
 
 // ─────────────────────────────────────────────────────────────────
-// DATABASE CLEAR ENDPOINT (Admin Utility)
+// DATABASE CLEAR ENDPOINT ⭐ MAJOR SECURITY FIX
 // ─────────────────────────────────────────────────────────────────
 
-app.delete('/api/clear-all', async (req, res) => {
+app.delete('/api/clear-all', strictLimiter, verifyJWT, async (req, res) => {
   try {
-    // Check for admin password in header
-    const adminKey = req.headers['x-admin-key'];
-    if (adminKey !== process.env.ADMIN_KEY && adminKey !== 'admin-override') {
-      return res.status(403).json({ message: '❌ Unauthorized' });
+    // ⭐ FIXED: Check user role with JWT verification
+    if (req.user.role !== 'admin') {
+      return sendError(res, RESPONSE_CODES.FORBIDDEN, 'Admin access required');
     }
 
     const Candidate = require('./models/Candidate');
@@ -310,14 +436,17 @@ app.delete('/api/clear-all', async (req, res) => {
     const candidatesDeleted = await Candidate.deleteMany({});
     const auditLogsDeleted = await AuditLog.deleteMany({});
     
-    res.json({
-      message: '✅ Database cleared successfully',
+    console.log(`[${res.locals.requestId}] Database cleared by ${req.user.email}`);
+    
+    sendResponse(res, RESPONSE_CODES.SUCCESS, {
+      success: true,
+      message: 'Database cleared successfully',
       candidates: candidatesDeleted.deletedCount,
       auditLogs: auditLogsDeleted.deletedCount
     });
   } catch (err) {
-    console.error('[clear-all]', err.message);
-    res.status(500).json({ message: err.message });
+    console.error(`[${res.locals.requestId}] Clear-all error:`, err.message);
+    sendError(res, RESPONSE_CODES.SERVER_ERROR, 'Failed to clear database');
   }
 });
 
@@ -326,11 +455,11 @@ app.delete('/api/clear-all', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 
 app.get('/', (req, res) => {
-  res.json({
+  sendResponse(res, RESPONSE_CODES.SUCCESS, {
+    success: true,
     message: 'Recruitment IQ API',
-    version: '1.0.0',
+    version: '1.1.0',
     status: 'online',
-    timestamp: new Date().toISOString(),
     endpoints: {
       health: '/api/health',
       aiHealth: '/api/ai-health',
@@ -349,14 +478,8 @@ app.get('/', (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 
 app.use((req, res) => {
-  console.warn(`[404] ${req.method} ${req.originalUrl}`);
-  res.status(404).json({
-    message: 'Route not found',
-    path: req.originalUrl,
-    method: req.method,
-    timestamp: new Date().toISOString(),
-    hint: 'Check your endpoint URL and HTTP method'
-  });
+  console.warn(`[${res.locals.requestId}] [404] ${req.method} ${req.originalUrl}`);
+  sendError(res, RESPONSE_CODES.NOT_FOUND, 'Route not found');
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -364,13 +487,23 @@ app.use((req, res) => {
 // ─────────────────────────────────────────────────────────────────
 
 app.use((err, req, res, next) => {
-  console.error('[ERROR]', err.stack || err.message);
+  const requestId = res.locals.requestId || 'unknown';
+  console.error(`[${requestId}] [ERROR]`, err.stack || err.message);
   
-  res.status(err.status || 500).json({
-    message: err.message || 'Internal server error',
-    error: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-    timestamp: new Date().toISOString()
-  });
+  // Handle rate limit errors
+  if (err.status === 429) {
+    return sendError(res, RESPONSE_CODES.RATE_LIMITED, 'Too many requests');
+  }
+
+  // Handle CORS errors
+  if (err.message.includes('CORS')) {
+    return sendError(res, RESPONSE_CODES.FORBIDDEN, 'CORS policy violation');
+  }
+
+  sendError(res, err.status || RESPONSE_CODES.SERVER_ERROR, 
+    err.message || 'Internal server error',
+    process.env.NODE_ENV === 'development' ? err.stack : undefined
+  );
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -379,7 +512,7 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-// ⭐ NEW: Check AI providers on startup
+// Check AI providers on startup
 const configuredProviders = getConfiguredProviders(process.env);
 const hasAiProviders = Object.values(configuredProviders).some(v => v);
 
@@ -394,21 +527,35 @@ if (!hasAiProviders) {
   console.log(`✅ AI Providers configured: ${active.join(', ')}`);
 }
 
-app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🌐 Frontend: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
-  console.log(`\nAPI Endpoints:`);
-  console.log(`  Health:        http://localhost:${PORT}/api/health`);
-  console.log(`  AI Health:     http://localhost:${PORT}/api/ai-health`);
-  console.log(`  AI Test:       http://localhost:${PORT}/api/ai-test`);
-  console.log(`  Analyze:       http://localhost:${PORT}/api/analyze (POST)`);
-  console.log(`  Root:          http://localhost:${PORT}/`);
+// ⭐ NEW: Start server properly
+startServer().then(() => {
+  app.listen(PORT, () => {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`✅ RecruitIQ Server running on port ${PORT}`);
+    console.log(`${'='.repeat(60)}`);
+    console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🌐 Frontend: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
+    console.log(`\nAPI Endpoints:`);
+    console.log(`  Health:        http://localhost:${PORT}/api/health`);
+    console.log(`  AI Health:     http://localhost:${PORT}/api/ai-health`);
+    console.log(`  AI Test:       http://localhost:${PORT}/api/ai-test`);
+    console.log(`  Analyze:       http://localhost:${PORT}/api/analyze (POST)`);
+    console.log(`  Root:          http://localhost:${PORT}/`);
+    console.log(`${'='.repeat(60)}\n`);
+  });
 });
 
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
+  console.log('\n✋ SIGTERM received, shutting down gracefully...');
   mongoose.connection.close();
   process.exit(0);
 });
+
+process.on('SIGINT', () => {
+  console.log('\n✋ SIGINT received, shutting down gracefully...');
+  mongoose.connection.close();
+  process.exit(0);
+});
+
+module.exports = app;

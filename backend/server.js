@@ -5,6 +5,12 @@ const helmet   = require('helmet');
 const morgan   = require('morgan');
 require('dotenv').config();
 
+// ============================================================
+// ⭐ NEW: MULTI-AI IMPORTS
+// ============================================================
+const { analyzeWithFallback, getHealthStatus } = require('./services/multiAiService');
+const { getConfiguredProviders } = require('./services/multiAiProviders');
+
 const app = express();
 
 // ─────────────────────────────────────────────────────────────────
@@ -129,6 +135,76 @@ for (const { path, file } of optionalRoutes) {
   }
 }
 
+// ============================================================
+// ⭐ NEW: MULTI-AI HEALTH ENDPOINT
+// ============================================================
+
+app.get('/api/ai-health', (req, res) => {
+  try {
+    const health = getHealthStatus(process.env);
+    res.json({
+      status: health.status,
+      providers: health.providers,
+      available: health.available,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(500).json({
+      status: 'error',
+      message: err.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+// ============================================================
+// ⭐ NEW: MULTI-AI ANALYSIS ENDPOINT
+// ============================================================
+
+app.post('/api/analyze', async (req, res) => {
+  try {
+    const { content } = req.body;
+    
+    // Validate input
+    if (!content || typeof content !== 'string' || content.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Content is required and must be a non-empty string',
+      });
+    }
+
+    // Call multi-AI service with fallback
+    console.log(`[ANALYZE] Processing content (${content.length} chars)...`);
+    const result = await analyzeWithFallback(content, process.env, console);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        analysis: result.analysis,
+        provider: result.provider, // Shows which AI provider was used
+        timestamp: new Date().toISOString(),
+      });
+    } else {
+      // All providers failed
+      res.status(503).json({
+        success: false,
+        error: result.error,
+        message: result.message || 'All AI providers failed',
+        tried: result.tried || [],
+        timestamp: new Date().toISOString(),
+      });
+    }
+  } catch (err) {
+    console.error('[ANALYZE ERROR]', err);
+    res.status(500).json({
+      success: false,
+      error: 'Analysis failed',
+      message: err.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────
 // HEALTH CHECK ENDPOINT
 // ─────────────────────────────────────────────────────────────────
@@ -139,7 +215,13 @@ app.get('/api/health', (req, res) => {
     db: mongoose.connection.readyState === 1 ? 1 : 0,
     timestamp: new Date().toISOString(),
     env: {
+      // ⭐ NEW: Show AI provider configuration
+      anthropic_api_key: !!process.env.ANTHROPIC_API_KEY,
       groq_api_key: !!process.env.GROQ_API_KEY,
+      huggingface_api_key: !!process.env.HUGGINGFACE_API_KEY,
+      cohere_api_key: !!process.env.COHERE_API_KEY,
+      mistral_api_key: !!process.env.MISTRAL_API_KEY,
+      // Existing config
       mongodb_uri: !!process.env.MONGODB_URI,
       frontend_url: process.env.FRONTEND_URL || 'not set',
       jwt_secret: !!process.env.JWT_SECRET
@@ -156,12 +238,28 @@ app.get('/api/health', (req, res) => {
 app.get('/api/ai-test', async (req, res) => {
   try {
     const envStatus = {
+      ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
       GROQ_API_KEY: !!process.env.GROQ_API_KEY,
+      HUGGINGFACE_API_KEY: !!process.env.HUGGINGFACE_API_KEY,
+      COHERE_API_KEY: !!process.env.COHERE_API_KEY,
+      MISTRAL_API_KEY: !!process.env.MISTRAL_API_KEY,
       MONGODB_URI: !!process.env.MONGODB_URI,
       JWT_SECRET: !!process.env.JWT_SECRET,
       FRONTEND_URL: process.env.FRONTEND_URL || 'not set'
     };
 
+    // ⭐ NEW: Test multi-AI system
+    let multiAiTest = 'not configured';
+    if (Object.values(envStatus).some((v, i) => i < 5 && v)) {
+      try {
+        const health = getHealthStatus(process.env);
+        multiAiTest = `Available: ${health.available.join(', ') || 'none'}`;
+      } catch (aiErr) {
+        multiAiTest = `Error: ${aiErr.message.substring(0, 50)}`;
+      }
+    }
+
+    // Existing Groq test
     let groqTest = 'not set';
     
     if (process.env.GROQ_API_KEY) {
@@ -184,6 +282,7 @@ app.get('/api/ai-test', async (req, res) => {
 
     res.json({
       environment: envStatus,
+      multiAiSystem: multiAiTest,
       groq: groqTest,
       db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
       timestamp: new Date().toISOString()
@@ -234,6 +333,9 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     endpoints: {
       health: '/api/health',
+      aiHealth: '/api/ai-health',
+      aiTest: '/api/ai-test',
+      analyze: '/api/analyze (POST)',
       auth: '/api/auth',
       candidates: '/api/candidates',
       jobs: '/api/jobs',
@@ -277,14 +379,31 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
+// ⭐ NEW: Check AI providers on startup
+const configuredProviders = getConfiguredProviders(process.env);
+const hasAiProviders = Object.values(configuredProviders).some(v => v);
+
+if (!hasAiProviders) {
+  console.warn('⚠️  WARNING: No AI providers configured!');
+  console.warn('   Add API keys to .env:');
+  console.warn('   - ANTHROPIC_API_KEY=sk-ant-...');
+  console.warn('   - GROQ_API_KEY=gsk_...');
+  console.warn('   - Or other providers');
+} else {
+  const active = Object.keys(configuredProviders).filter(k => configuredProviders[k]);
+  console.log(`✅ AI Providers configured: ${active.join(', ')}`);
+}
+
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌐 Frontend: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
   console.log(`\nAPI Endpoints:`);
-  console.log(`  Health:  http://localhost:${PORT}/api/health`);
-  console.log(`  Test AI: http://localhost:${PORT}/api/ai-test`);
-  console.log(`  Root:    http://localhost:${PORT}/`);
+  console.log(`  Health:        http://localhost:${PORT}/api/health`);
+  console.log(`  AI Health:     http://localhost:${PORT}/api/ai-health`);
+  console.log(`  AI Test:       http://localhost:${PORT}/api/ai-test`);
+  console.log(`  Analyze:       http://localhost:${PORT}/api/analyze (POST)`);
+  console.log(`  Root:          http://localhost:${PORT}/`);
 });
 
 // Handle graceful shutdown

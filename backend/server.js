@@ -117,15 +117,26 @@ app.get('/api/ai-test', async function(req, res) {
   var groqTest = 'not set';
   if (process.env.GROQ_API_KEY) {
     try {
-      const Groq = require('groq-sdk');
-      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-      const response = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: 'Reply with just the word: ok' }],
-        max_tokens: 5
+      const fetchResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: 'Reply with just the word: ok' }],
+          max_tokens: 5
+        })
       });
-      const content = response.choices[0]?.message?.content || '';
-      groqTest = '✅ Connected: ' + content.substring(0, 20);
+      if (!fetchResponse.ok) {
+        const errText = await fetchResponse.text();
+        groqTest = '❌ HTTP ' + fetchResponse.status + ': ' + errText.substring(0, 60);
+      } else {
+        const data = await fetchResponse.json();
+        const reply = data.choices[0]?.message?.content || '';
+        groqTest = '✅ Connected: ' + reply.substring(0, 20);
+      }
     } catch (groqErr) {
       groqTest = '❌ Error: ' + groqErr.message.substring(0, 80);
     }

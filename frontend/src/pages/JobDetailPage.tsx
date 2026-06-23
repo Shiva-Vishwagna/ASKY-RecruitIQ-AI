@@ -126,7 +126,7 @@ export default function JobDetailPage() {
 
   async function fetchCandidates() {
     try {
-      const res  = await fetch(`${API}/jobs/${id}/candidates?t=${Date.now()}`, { headers: { Authorization: `Bearer ${token}`, 'Cache-Control': 'no-cache' } });
+      const res  = await fetch(`${API}/jobs/${id}/candidates?t=${Date.now()}`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       setCandidates(data.candidates || data || []);
     } catch { setCandidates([]); }

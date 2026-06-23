@@ -235,7 +235,7 @@ export default function CandidateDetailPage() {
   const tierKey    = (candidate.tier || "C-Tier").replace(/-?Tier$/i, "");
   const TIER_BG    = ({A:"bg-emerald-100 text-emerald-700",B:"bg-blue-100 text-blue-700",C:"bg-amber-100 text-amber-700"} as any)[tierKey] || "bg-gray-100 text-gray-600";
   const TIER_GRAD  = ({A:"from-emerald-400 to-emerald-600",B:"from-blue-400 to-blue-600",C:"from-amber-400 to-amber-600"} as any)[tierKey] || "from-gray-400 to-gray-600";
-  const rec        = candidate.recommendation || (cvScore>=85?"Strong Hire":cvScore>=72?"Hire":cvScore>=58?"Consider":cvScore>=42?"Weak Fit":"Reject");
+  const rec        = (cvScore>=85?"Strong Hire":cvScore>=72?"Hire":cvScore>=58?"Consider":cvScore>=42?"Weak Fit":"Reject");
   const curStage   = STAGES.find(s=>s.value===(candidate.status||"cv_uploaded")) || STAGES[0];
   const sessions   = candidate.screeningSessions || [];
   const aiSess     = sessions.filter(s=>s.sessionType==="ai_generated");
@@ -329,18 +329,30 @@ export default function CandidateDetailPage() {
               )}
             </div>
             {cvScore===0 && (
-              <div className="text-xs text-red-500 font-medium">⚠️ Add GROQ_API_KEY in Render → Environment</div>
+              <div className="text-xs text-amber-500 font-medium">⚠️ AI screening pending — click Run AI Screening</div>
             )}
           </div>
         </div>
 
-        {/* Risk flags */}
-        {(candidate.riskFlags?.frequentJobChanges || (candidate.riskFlags?.missingMandatorySkills||[]).length>0 || candidate.riskFlags?.domainMismatch) && (
+        {/* Risk flags + Stability */}
+        {(candidate.riskFlags?.frequentJobChanges || (candidate.riskFlags?.missingMandatorySkills||[]).length>0 || candidate.riskFlags?.domainMismatch || (candidate as any).shortTenureCompanies?.length>0) && (
           <div className="mt-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
             <span className="text-xs font-bold text-red-700 mr-3">⚠️ Risk Flags:</span>
             {candidate.riskFlags?.frequentJobChanges && <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full font-semibold mr-2">🔄 Frequent job changes</span>}
             {candidate.riskFlags?.domainMismatch     && <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-semibold mr-2">🎯 Domain mismatch</span>}
             {(candidate.riskFlags?.missingMandatorySkills||[]).map(s=><span key={s} className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full font-semibold mr-2">Missing: {s}</span>)}
+            {((candidate as any).shortTenureCompanies||[]).map((c:string)=><span key={c} className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-semibold mr-2">⏱️ {c}</span>)}
+          </div>
+        )}
+        {/* Stability Summary */}
+        {(candidate as any).companiesWorkedAt > 0 && (
+          <div className="mt-2 flex gap-3 flex-wrap">
+            <span className="text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full">🏢 {(candidate as any).companiesWorkedAt} companies</span>
+            {(candidate as any).averageTenureYears > 0 && (
+              <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${(candidate as any).averageTenureYears >= 2 ? "bg-emerald-100 text-emerald-700" : "bg-orange-100 text-orange-700"}`}>
+                ⏱️ Avg {(candidate as any).averageTenureYears}y per company {(candidate as any).averageTenureYears < 2 ? "⚠️" : "✅"}
+              </span>
+            )}
           </div>
         )}
 

@@ -113,6 +113,7 @@ export default function CandidateDetailPage() {
       const c = d.candidate || d;
       setCandidate(c);
       setQuestions(c.interviewQuestions || []);
+      if (c.status === "hm_ready") setHmDone(true);
     } finally { setLoading(false); }
   }
 
@@ -221,7 +222,7 @@ export default function CandidateDetailPage() {
       const r = await fetch(`${API}/candidates/${id}/hm-report`, {
         method:"POST",
         headers:{"Content-Type":"application/json", Authorization:`Bearer ${token}`},
-        body: JSON.stringify({ reportType:hmMode, sessionIndex:sessionIdx }),
+        body: JSON.stringify({ hmReportType:hmMode, reportType:hmMode, sessionIndex:sessionIdx }),
       });
       const d = await r.json();
       if (!r.ok) { alert(d.message || "Failed"); return; }

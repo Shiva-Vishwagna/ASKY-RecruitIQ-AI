@@ -107,14 +107,29 @@ app.get('/api/health', function(req, res) {
   });
 });
 
-app.get('/api/ai-test', function(req, res) {
+app.get('/api/ai-test', async function(req, res) {
   var envStatus = {
     GROQ_API_KEY: !!process.env.GROQ_API_KEY,
     MONGODB_URI: !!process.env.MONGODB_URI,
     JWT_SECRET: !!process.env.JWT_SECRET,
     FRONTEND_URL: process.env.FRONTEND_URL || 'not set'
   };
-  var groqTest = 'not tested';
+  var groqTest = 'not set';
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const Groq = require('groq-sdk');
+      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+      const response = await groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: 'Reply with just the word: ok' }],
+        max_tokens: 5
+      });
+      const content = response.choices[0]?.message?.content || '';
+      groqTest = '✅ Connected: ' + content.substring(0, 20);
+    } catch (groqErr) {
+      groqTest = '❌ Error: ' + groqErr.message.substring(0, 80);
+    }
+  }
   res.json({
     environment: envStatus,
     groq: groqTest,

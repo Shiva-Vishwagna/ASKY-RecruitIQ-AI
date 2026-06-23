@@ -99,10 +99,29 @@ router.post('/upload', protect, (req, res) => {
           const ai = await screenResumeWithAI(rawText, jobContext);
 
           if (!ai) {
-            console.error('[upload] AI screening returned null for:', file.originalname);
-            // Still save candidate with basic info extracted from filename
+            console.error('[upload] AI screening returned null for:', file.originalname, '— saving with basic info');
+            // Save candidate with basic info even when AI fails
             const fallbackName = file.originalname.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
-            results.push({ error: 'AI screening failed — GROQ_API_KEY may not be set in Render environment variables. Add GROQ_API_KEY to Render → Environment and redeploy.', file: file.originalname, candidateName: fallbackName });
+            try {
+              const fallbackCandidate = await Candidate.create({
+                name:       fallbackName,
+                email:      '',
+                appliedFor: trunc(req.body.jobTitle || jobContext.title || '', 100),
+                jobId:      req.body.jobId ? require('mongoose').Types.ObjectId.isValid(req.body.jobId) ? new (require('mongoose').Types.ObjectId)(req.body.jobId) : null : null,
+                aiScore:    0,
+                tier:       'C-Tier',
+                riskLevel:  'medium',
+                status:     'cv_uploaded',
+                uploadedBy: req.user._id,
+                uploadedByName: trunc(req.user.name, 50),
+                summary:    'AI screening pending — GROQ API key may need to be refreshed in Render environment.',
+              });
+              results.push(fallbackCandidate);
+              console.log('[upload] Saved fallback candidate:', fallbackName);
+            } catch (saveErr) {
+              console.error('[upload] Could not save fallback candidate:', saveErr.message);
+              results.push({ error: 'AI screening failed and could not save candidate.', file: file.originalname });
+            }
             continue;
           }
 

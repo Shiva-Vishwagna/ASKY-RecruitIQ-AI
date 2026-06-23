@@ -118,7 +118,7 @@ router.post('/upload', protect, (req, res) => {
             email:           trunc(ai.email  || '', 100),
             phone:           trunc(ai.phone  || '', 20),
             appliedFor:      trunc(req.body.jobTitle || jobContext.title || '', 100),
-            jobId:           req.body.jobId || null,
+            jobId:           req.body.jobId ? require('mongoose').Types.ObjectId.isValid(req.body.jobId) ? new (require('mongoose').Types.ObjectId)(req.body.jobId) : null : null,
 
             domain:          trunc(ai.domain    || '', 50),
             seniority:       trunc(ai.seniority || '', 30),

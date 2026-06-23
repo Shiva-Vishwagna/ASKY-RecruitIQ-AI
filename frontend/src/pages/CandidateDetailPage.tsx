@@ -231,6 +231,166 @@ export default function CandidateDetailPage() {
     } finally { setHmLoading(false); }
   }
 
+  // ── Export Functions ────────────────────────────────────────
+  function exportPDF() {
+    const lastSession = sessions[sessions.length - 1];
+    const html = generateReportHTML(candidate, lastSession, hmMode, cvScore);
+    const win = window.open('', '_blank');
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); }, 500);
+  }
+
+  function exportWord() {
+    const lastSession = sessions[sessions.length - 1];
+    const html = generateReportHTML(candidate, lastSession, hmMode, cvScore);
+    const blob = new Blob([html], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `HM_Report_${candidate.name?.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function generateReportHTML(c: any, session: any, mode: string, cvSc: number) {
+    const combinedScore = c.combinedScore || cvSc;
+    const recColor = combinedScore >= 80 ? '#16a34a' : combinedScore >= 60 ? '#2563eb' : combinedScore >= 40 ? '#d97706' : '#dc2626';
+    const date = new Date().toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' });
+    const qaRows = (session?.answers || []).map((a: any, i: number) => `
+      <tr style="border-bottom:1px solid #e5e7eb;">
+        <td style="padding:12px 16px;vertical-align:top;width:40px;color:#6b7280;font-size:13px;">${i+1}</td>
+        <td style="padding:12px 16px;vertical-align:top;">
+          <div style="font-weight:600;color:#111827;font-size:13px;margin-bottom:6px;">${a.question || ''}</div>
+          <div style="color:#374151;font-size:13px;background:#f9fafb;padding:8px 12px;border-radius:6px;margin-bottom:6px;">${a.userAnswer || 'No answer provided'}</div>
+          ${a.aiFeedback ? `<div style="color:#6b7280;font-size:12px;font-style:italic;">💡 ${a.aiFeedback}</div>` : ''}
+        </td>
+        <td style="padding:12px 16px;vertical-align:top;text-align:center;width:70px;">
+          <span style="font-weight:700;font-size:16px;color:${(a.aiScore||0)>=70?'#16a34a':(a.aiScore||0)>=50?'#2563eb':'#dc2626'}">${a.aiScore||0}</span>
+          <div style="color:#9ca3af;font-size:11px;">/100</div>
+        </td>
+      </tr>`).join('');
+
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>HM Report - ${c.name}</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; padding: 40px; color: #111827; background: white; }
+      @media print { body { padding: 20px; } .no-print { display: none !important; } }
+      h1,h2,h3 { margin: 0; }
+      table { width: 100%; border-collapse: collapse; }
+    </style></head><body>
+    <!-- Header -->
+    <div style="background:linear-gradient(135deg,#1e3a5f,#2563eb);color:white;padding:32px;border-radius:12px;margin-bottom:24px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <div>
+          <div style="font-size:12px;opacity:0.7;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Hiring Manager Report</div>
+          <h1 style="font-size:28px;font-weight:800;margin-bottom:4px;">${c.name}</h1>
+          <div style="opacity:0.85;font-size:14px;">${c.appliedFor || c.jobTitle || 'Position'} · ${c.seniority || ''} · ${c.experienceYears || 0} years exp</div>
+          ${c.email ? `<div style="opacity:0.7;font-size:13px;margin-top:4px;">📧 ${c.email}${c.phone ? ` · 📞 ${c.phone}` : ''}</div>` : ''}
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:48px;font-weight:900;line-height:1;">${combinedScore}</div>
+          <div style="font-size:12px;opacity:0.7;">/100 Final Score</div>
+          <div style="margin-top:8px;background:white;color:${recColor};padding:4px 12px;border-radius:20px;font-weight:700;font-size:13px;display:inline-block;">${c.recommendation || 'Pending'}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Score Summary -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;">
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;text-align:center;">
+        <div style="font-size:28px;font-weight:800;color:#16a34a;">${cvSc}</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:2px;">CV Score</div>
+      </div>
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px;text-align:center;">
+        <div style="font-size:28px;font-weight:800;color:#2563eb;">${c.cvScoreBreakdown?.skillsMatchScore||0}</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:2px;">Skills Match</div>
+      </div>
+      <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:16px;text-align:center;">
+        <div style="font-size:28px;font-weight:800;color:#7c3aed;">${c.cvScoreBreakdown?.stabilityScore||0}</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:2px;">Stability Score</div>
+      </div>
+      <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:10px;padding:16px;text-align:center;">
+        <div style="font-size:28px;font-weight:800;color:#b45309;">${session?.screeningScore||0}</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:2px;">Screening Score</div>
+      </div>
+    </div>
+
+    <!-- Stability Details -->
+    ${(c.companiesWorkedAt || c.averageTenureYears) ? `
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:24px;">
+      <h3 style="font-size:14px;font-weight:700;color:#374151;margin-bottom:10px;">📊 Career Stability Analysis</h3>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;">
+        <span style="font-size:13px;color:#374151;">🏢 <strong>${c.companiesWorkedAt||0}</strong> companies worked</span>
+        <span style="font-size:13px;color:${(c.averageTenureYears||0)>=2?'#16a34a':'#d97706'};">⏱️ Avg <strong>${c.averageTenureYears||0}y</strong> per company ${(c.averageTenureYears||0)<2?'⚠️ Below 2yr':'✅'}</span>
+        ${(c.shortTenureCompanies||[]).length>0 ? `<span style="font-size:13px;color:#d97706;">⚠️ Short tenure: ${c.shortTenureCompanies.join(', ')}</span>` : ''}
+      </div>
+    </div>` : ''}
+
+    <!-- AI Summary -->
+    ${c.summary ? `
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:24px;">
+      <h3 style="font-size:14px;font-weight:700;color:#374151;margin-bottom:8px;">🤖 AI Summary</h3>
+      <p style="font-size:13px;color:#374151;line-height:1.6;margin:0;">${c.summary}</p>
+    </div>` : ''}
+
+    <!-- Skills & Profile -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;">
+      ${(c.topSkills||[]).length>0 ? `
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <h3 style="font-size:14px;font-weight:700;color:#374151;margin-bottom:10px;">🛠️ Top Skills</h3>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          ${(c.topSkills||[]).map((s: string)=>`<span style="background:#dbeafe;color:#1d4ed8;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600;">${s}</span>`).join('')}
+        </div>
+      </div>` : ''}
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <h3 style="font-size:14px;font-weight:700;color:#374151;margin-bottom:10px;">✅ Strengths & ⚠️ Gaps</h3>
+        ${(c.strengths||[]).slice(0,3).map((s: string)=>`<div style="font-size:12px;color:#374151;margin-bottom:4px;">✅ ${s}</div>`).join('')}
+        ${(c.gaps||[]).slice(0,3).map((g: string)=>`<div style="font-size:12px;color:#b45309;margin-bottom:4px;">⚠️ ${g}</div>`).join('')}
+      </div>
+    </div>
+
+    <!-- Q&A Section -->
+    ${session?.answers?.length > 0 ? `
+    <div style="margin-bottom:24px;">
+      <h3 style="font-size:16px;font-weight:700;color:#111827;margin-bottom:12px;">📝 Screening Questions & Answers</h3>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:8px;">Session: ${session.sessionType === 'ai_generated' ? 'AI Generated' : 'Question Bank'} · Difficulty: ${session.difficulty || 'Medium'} · Score: ${session.screeningScore||0}/100</div>
+      <table style="width:100%;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+        <thead>
+          <tr style="background:#f9fafb;">
+            <th style="padding:10px 16px;text-align:left;font-size:12px;color:#6b7280;width:40px;">#</th>
+            <th style="padding:10px 16px;text-align:left;font-size:12px;color:#6b7280;">Question & Answer</th>
+            <th style="padding:10px 16px;text-align:center;font-size:12px;color:#6b7280;width:70px;">Score</th>
+          </tr>
+        </thead>
+        <tbody>${qaRows}</tbody>
+      </table>
+    </div>` : ''}
+
+    <!-- Risk Flags -->
+    ${(c.riskFlags?.frequentJobChanges || c.riskFlags?.domainMismatch || (c.riskFlags?.missingMandatorySkills||[]).length>0) ? `
+    <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:16px;margin-bottom:24px;">
+      <h3 style="font-size:14px;font-weight:700;color:#c2410c;margin-bottom:10px;">⚠️ Risk Flags</h3>
+      ${c.riskFlags?.frequentJobChanges ? '<div style="font-size:13px;color:#c2410c;margin-bottom:4px;">🔄 Frequent job changes detected</div>' : ''}
+      ${c.riskFlags?.domainMismatch ? '<div style="font-size:13px;color:#c2410c;margin-bottom:4px;">🎯 Domain mismatch</div>' : ''}
+      ${(c.riskFlags?.missingMandatorySkills||[]).map((s: string)=>`<div style="font-size:13px;color:#c2410c;margin-bottom:4px;">❌ Missing: ${s}</div>`).join('')}
+    </div>` : ''}
+
+    <!-- Footer -->
+    <div style="border-top:1px solid #e5e7eb;padding-top:16px;margin-top:24px;display:flex;justify-content:space-between;color:#9ca3af;font-size:12px;">
+      <span>Generated by Recruit IQ · ${date}</span>
+      <span>Report Type: ${mode.replace(/_/g,' ').replace(/\b\w/g,(l: string)=>l.toUpperCase())}</span>
+      <span>Confidential — Internal Use Only</span>
+    </div>
+
+    <div class="no-print" style="margin-top:24px;text-align:center;">
+      <button onclick="window.print()" style="background:#1e3a5f;color:white;border:none;padding:12px 32px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">🖨️ Print / Save as PDF</button>
+    </div>
+    </body></html>`;
+  }
+
   // ── Derived values ─────────────────────────────────────────
   if (loading) return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -859,14 +1019,30 @@ export default function CandidateDetailPage() {
             </div>
 
             {hmDone ? (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 text-center">
-                <p className="font-bold text-emerald-800 text-lg">✅ Candidate is HM Ready!</p>
-                <p className="text-sm text-emerald-600 mt-1">Report: <strong>{hmMode.replace(/_/g," ").replace(/\b\w/g,l=>l.toUpperCase())}</strong> · Final Score: <strong>{candidate.combinedScore}/100</strong> · {candidate.recommendation}</p>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5">
+                <div className="text-center mb-4">
+                  <p className="font-bold text-emerald-800 text-lg">✅ Candidate is HM Ready!</p>
+                  <p className="text-sm text-emerald-600 mt-1">Report: <strong>{hmMode.replace(/_/g," ").replace(/\w/g,l=>l.toUpperCase())}</strong> · Final Score: <strong>{candidate.combinedScore}/100</strong> · {candidate.recommendation}</p>
+                </div>
+                <div className="flex gap-3 justify-center flex-wrap">
+                  <button onClick={exportPDF}
+                    className="flex items-center gap-2 bg-red-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-red-700 transition-all text-sm shadow-sm">
+                    📄 Download PDF
+                  </button>
+                  <button onClick={exportWord}
+                    className="flex items-center gap-2 bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-blue-800 transition-all text-sm shadow-sm">
+                    📝 Download Word
+                  </button>
+                  <button onClick={exportPDF}
+                    className="flex items-center gap-2 bg-slate-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-slate-700 transition-all text-sm shadow-sm">
+                    🖨️ Print Report
+                  </button>
+                </div>
               </div>
             ) : (
               <button onClick={setHMReport} disabled={hmLoading}
                 className="w-full bg-slate-800 text-white py-4 rounded-xl font-bold hover:bg-slate-900 disabled:opacity-60 text-base">
-                {hmLoading?"⏳ Saving...":"✅ Confirm & Mark as HM Ready"}
+                {hmLoading?"⏳ Generating Report...":"✅ Confirm & Generate HM Report"}
               </button>
             )}
           </div>

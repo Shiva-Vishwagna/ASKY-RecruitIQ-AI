@@ -181,6 +181,9 @@ router.post('/upload', protect, (req, res) => {
             frameworks:          arr(ai.frameworks,  8).map(s => trunc(s, 50)),
             tools:               arr(ai.tools,       8).map(s => trunc(s, 50)),
             strengths:           arr(ai.strengths,   4).map(s => trunc(s, 200)),
+            companiesWorkedAt:   num(ai.companiesWorkedAt, 50),
+            shortTenureCompanies: arr(ai.shortTenureCompanies, 10).map(s => trunc(s, 100)),
+            averageTenureYears:  num(ai.averageTenureYears, 50),
             gaps:                arr(ai.gaps,        4).map(s => trunc(s, 200)),
             projectDomains:      arr(ai.projectDomains, 4).map(s => trunc(s, 50)),
             skillScores:         arr(ai.skillScores, 8).map(s => ({

@@ -1,13 +1,31 @@
-const Groq = require('groq-sdk');
-
 /**
  * RECRUIT IQ — AI SERVICE (COMPLETE VERSION)
  * ========================
- * Handles all AI operations using Groq API
+ * Handles all AI operations using Groq API via direct HTTP
  */
 
-// Initialize Groq client
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+// Direct GROQ API call - bypasses SDK version issues
+async function callGroq(messages, maxTokens = 2000) {
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      messages: messages,
+      temperature: 0.3,
+      max_tokens: maxTokens
+    })
+  });
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error('GROQ API error: ' + response.status + ' ' + err.substring(0, 100));
+  }
+  const data = await response.json();
+  return data.choices[0]?.message?.content || '';
+}
 
 // ─────────────────────────────────────────────────────────────────
 // SCREEN RESUME WITH AI
@@ -126,19 +144,12 @@ Return ONLY valid JSON. No markdown. Start with { and end with }
   "skillScores": [{"skill": "skill1", "score": 85}]
 }`;
 
-    const message = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [
-        {
-          role: 'user',
-          content: `${prompt}\n\nREVENAL TEXT:\n${resumeText.substring(0, 8000)}`
-        }
-      ],
-      temperature: 0.3,
-      max_tokens: 2000
-    });
-
-    const response = message.choices[0]?.message?.content || '';
+    const response = await callGroq([
+      {
+        role: 'user',
+        content: `${prompt}\n\nREVENAL TEXT:\n${resumeText.substring(0, 8000)}`
+      }
+    ], 2000);
     
     // Extract JSON from response
     const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -225,14 +236,7 @@ Return ONLY JSON array, no markdown or extra text:
   ...
 ]`;
 
-    const message = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.5,
-      max_tokens: 1500
-    });
-
-    const response = message.choices[0]?.message?.content || '[]';
+    const response = await callGroq([{ role: 'user', content: prompt }], 1500) || '[]';
     const jsonMatch = response.match(/\[[\s\S]*\]/);
     
     if (!jsonMatch) {
@@ -332,14 +336,7 @@ Return ONLY JSON, no markdown:
   }
 }`;
 
-    const message = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      max_tokens: 1500
-    });
-
-    const response = message.choices[0]?.message?.content || '{}';
+    const response = await callGroq([{ role: 'user', content: prompt }], 1500) || '{}';
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     
     if (!jsonMatch) {
@@ -419,14 +416,7 @@ Return ONLY JSON:
   "suggestedNextSteps": ["step1"]
 }`;
 
-    const message = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.3,
-      max_tokens: 1000
-    });
-
-    const response = message.choices[0]?.message?.content || '{}';
+    const response = await callGroq([{ role: 'user', content: prompt }], 1000) || '{}';
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     
     if (!jsonMatch) {

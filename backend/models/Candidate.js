@@ -82,6 +82,9 @@ const CandidateSchema = new mongoose.Schema({
   primarySkillScore: { type: Number, min: 0, max: 100 },
   jobFitScore:       { type: Number, min: 0, max: 100 },
 
+  companiesWorkedAt:    { type: Number, default: 0 },
+  shortTenureCompanies: [{ type: String }],
+  averageTenureYears:   { type: Number, default: 0 },
   riskFlags: {
     frequentJobChanges:     { type: Boolean, default: false },
     noticePeriodRisk:       { type: String, maxlength: 100, default: "" },

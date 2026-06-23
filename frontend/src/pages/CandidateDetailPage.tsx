@@ -183,16 +183,29 @@ export default function CandidateDetailPage() {
     if (answers.some(a => !a.trim())) { alert("Please answer all questions"); return; }
     setSubmitLoading(true);
     try {
-      const payload = questions.map((q,i) => ({ question:q, answer:answers[i] }));
       const r = await fetch(`${API}/candidates/${id}/answers`, {
         method:"POST",
         headers:{"Content-Type":"application/json", Authorization:`Bearer ${token}`},
-        body: JSON.stringify({ answers:payload, sessionType: qMode==="ai"?"ai_generated":"bank_questions", difficulty }),
+        body: JSON.stringify({
+          questions: questions,
+          answers: answers,
+          sessionType: qMode==="ai"?"ai_generated":"bank_questions",
+          difficulty
+        }),
       });
       const d = await r.json();
+      if (!r.ok) { alert(d.message || "Scoring failed. Please try again."); return; }
       setScreenResult(d);
-      setCandidate(p => p ? {...p, ...d.candidate} : p);
+      setCandidate(p => p ? {
+        ...p,
+        screeningScore: d.session?.screeningScore || d.overallScore || 0,
+        screeningSessions: [...(p.screeningSessions||[]), d.session],
+        combinedScore: d.session?.screeningScore || 0,
+        status: "answers_submitted"
+      } : p);
       setTab("hm-report");
+    } catch(err) {
+      alert("Failed to submit answers. Please try again.");
     } finally { setSubmitLoading(false); }
   }
 

@@ -262,18 +262,20 @@ router.post('/:id/answers', protect, async (req, res) => {
       });
     }
 
-    // Create screening session
+    // Create screening session - handle both string arrays and object arrays
+    const normalizedAnswers = answers.map((ans, i) => ({
+      question: questions[i] || (typeof ans === 'object' ? ans.question : ''),
+      userAnswer: typeof ans === 'object' ? ans.answer : ans,
+      aiScore: screeningResults?.scores?.[i] || 0,
+      aiFeedback: screeningResults?.feedback?.[i] || ''
+    }));
+
     const session = {
       sessionType,
       difficulty,
       conductedAt: new Date(),
       conductedBy: req.user.name,
-      answers: answers.map((ans, i) => ({
-        question: questions[i],
-        userAnswer: ans,
-        aiScore: screeningResults?.scores[i] || 0,
-        aiFeedback: screeningResults?.feedback[i] || ''
-      })),
+      answers: normalizedAnswers,
       screeningScore: screeningResults?.overallScore || 0,
       screeningBreakdown: screeningResults?.breakdown || {}
     };
@@ -301,7 +303,17 @@ router.post('/:id/answers', protect, async (req, res) => {
     res.json({
       message: 'Answers evaluated successfully',
       session,
-      overallScore: session.screeningScore
+      overallScore: session.screeningScore,
+      screeningScore: session.screeningScore,
+      combinedScore: candidate.combinedScore || session.screeningScore,
+      recommendation: candidate.recommendation,
+      candidate: {
+        _id: candidate._id,
+        screeningScore: candidate.screeningScore,
+        combinedScore: candidate.combinedScore,
+        status: candidate.status,
+        screeningSessions: candidate.screeningSessions
+      }
     });
   } catch (err) {
     console.error('[POST /answers]', err.message);

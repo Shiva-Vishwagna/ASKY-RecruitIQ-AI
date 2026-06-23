@@ -51,6 +51,19 @@ export default function JobsPage() {
   const user  = JSON.parse(localStorage.getItem("user") || "{}");
   const isAdmin = user?.role === "admin";
 
+  async function deleteJob(jobId: string, jobTitle: string) {
+    if (!window.confirm(`Delete job "${jobTitle}"? This cannot be undone.`)) return;
+    try {
+      await fetch(`${API}/jobs/${jobId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setJobs(prev => prev.filter(j => j._id !== jobId));
+    } catch (err) {
+      alert("Failed to delete job. Please try again.");
+    }
+  }
+
   useEffect(() => {
     fetchJobs();
     // Close status menu on outside click
@@ -214,11 +227,18 @@ export default function JobsPage() {
                       {job.title}
                     </h3>
                     {isAdmin && (
-                      <button onClick={e => { e.stopPropagation(); setEditingTitleId(job._id); setEditingTitleValue(job.title); }}
-                        title="Edit title"
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-600 shrink-0">
-                        ✏️
-                      </button>
+                      <>
+                        <button onClick={e => { e.stopPropagation(); setEditingTitleId(job._id); setEditingTitleValue(job.title); }}
+                          title="Edit title"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-blue-600 shrink-0">
+                          ✏️
+                        </button>
+                        <button onClick={e => { e.stopPropagation(); deleteJob(job._id, job.title); }}
+                          title="Delete job"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-600 shrink-0">
+                          🗑️
+                        </button>
+                      </>
                     )}
                   </div>
                 )}

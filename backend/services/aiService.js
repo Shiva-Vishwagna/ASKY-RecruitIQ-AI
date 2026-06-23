@@ -41,11 +41,14 @@ SCORING — 2 factors:
    ${primarySkill ? `CRITICAL: Primary skill is "${primarySkill}". If NOT in CV → max 35.` : ''}
 
 2. stabilityScore (0-100) — weight 30%
-   Reliability based on job tenure.
-   90+: 2.5+ years average per role
-   70-89: Mostly stable career
-   50-69: Some roles under 1 year
-   Below 50: Multiple roles under 6 months
+   Reliability based on job tenure and career stability.
+   90+: 2.5+ years average per role, consistent career
+   70-89: Mostly stable, 1.5-2.5 yrs average per role
+   50-69: Some roles under 1 year, some job hopping
+   Below 50: Multiple roles under 6 months, frequent changes
+   
+   IMPORTANT: Count total companies worked at and flag any company 
+   where tenure was less than 2 years as a stability risk (frequentJobChanges: true if 2+ such companies)
 ` : `
 ROLE TYPE: NON-TECHNICAL
 
@@ -103,6 +106,9 @@ Return ONLY valid JSON. No markdown. Start with { and end with }
     "missingMandatorySkills": [],
     "domainMismatch": false
   },
+  "companiesWorkedAt": 3,
+  "shortTenureCompanies": ["CompanyA (8 months)", "CompanyB (1.2 years)"],
+  "averageTenureYears": 1.8,
   "summary": "Brief 2-3 line summary of candidate",
   "hmSummary": "HM summary here",
   "technicalExperience": "Technical background details",
@@ -121,7 +127,7 @@ Return ONLY valid JSON. No markdown. Start with { and end with }
 }`;
 
     const message = await groq.chat.completions.create({
-      model: 'llama3-8b-8192',
+      model: 'llama-3.3-70b-versatile',
       messages: [
         {
           role: 'user',
@@ -220,7 +226,7 @@ Return ONLY JSON array, no markdown or extra text:
 ]`;
 
     const message = await groq.chat.completions.create({
-      model: 'llama3-8b-8192',
+      model: 'llama-3.3-70b-versatile',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.5,
       max_tokens: 1500
@@ -327,7 +333,7 @@ Return ONLY JSON, no markdown:
 }`;
 
     const message = await groq.chat.completions.create({
-      model: 'llama3-8b-8192',
+      model: 'llama-3.3-70b-versatile',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
       max_tokens: 1500
@@ -414,7 +420,7 @@ Return ONLY JSON:
 }`;
 
     const message = await groq.chat.completions.create({
-      model: 'llama3-8b-8192',
+      model: 'llama-3.3-70b-versatile',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
       max_tokens: 1000

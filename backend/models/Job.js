@@ -11,6 +11,9 @@ const jobSchema = new mongoose.Schema({
   candidateCount: { type: Number, default: 0 },
   questions:      [{ type: String }],
 
+  // Role Type — Technical or Non-Technical
+  roleType:       { type: String, enum: ['technical','non_technical'], default: 'technical' },
+
   // Level Engine
   level:          { type: String, default: 'Mid' },
   primarySkill:   { type: String, default: '' },

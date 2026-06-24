@@ -104,7 +104,7 @@ async function callWithFallback(messages, maxTokens = 2000) {
       }
     } catch (err) {
       if (err.message && err.message.includes('RATE_LIMIT')) {
-        rateLimitCooldowns[provider.name] = now + 60000; // 60s cooldown
+        rateLimitCooldowns[provider.name] = now + 30000; // 30s cooldown
         console.warn(`[AI] ⚠️ Rate limited: ${provider.name}`);
       } else {
         console.warn(`[AI] ❌ ${provider.name}: ${err.message}`);
@@ -113,7 +113,34 @@ async function callWithFallback(messages, maxTokens = 2000) {
     }
   }
 
-  throw lastError || new Error('All AI providers exhausted');
+  // If all providers are in cooldown, wait 10s and try again once
+  const allInCooldown = activeProviders.every(p => 
+    rateLimitCooldowns[p.name] && rateLimitCooldowns[p.name] > Date.now()
+  );
+  
+  if (allInCooldown && activeProviders.length > 0) {
+    console.log('[AI] All providers in cooldown — waiting 10s before retry...');
+    await new Promise(resolve => setTimeout(resolve, 10000));
+    
+    // Clear all cooldowns and try again
+    activeProviders.forEach(p => delete rateLimitCooldowns[p.name]);
+    
+    for (const provider of activeProviders.slice(0, 3)) {
+      try {
+        const key = process.env[provider.envKey];
+        const result = await callProvider(provider, key, messages, maxTokens);
+        if (result) {
+          console.log('[AI] ✅ Retry succeeded with: ' + provider.name);
+          return result;
+        }
+      } catch (err) {
+        console.warn('[AI] Retry failed on ' + provider.name + ': ' + err.message);
+        lastError = err;
+      }
+    }
+  }
+
+  throw lastError || new Error('All AI providers exhausted. Try again in a few minutes.');
 }
 
 // ─────────────────────────────────────────────────────────────────

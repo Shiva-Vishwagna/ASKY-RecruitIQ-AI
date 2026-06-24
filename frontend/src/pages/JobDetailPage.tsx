@@ -168,10 +168,21 @@ export default function JobDetailPage() {
       const r = await fetch(`${API}/resumes/upload`, { method:"POST", headers:{Authorization:`Bearer ${token}`}, body:fd });
       const d = await r.json();
       const saved   = (d.candidates||[]).filter((c:any) => c._id).length;
-      const errored = (d.candidates||[]).filter((c:any) => c.error).length;
-      setUploadProgress({ total: files.length, done: saved, current: `✅ ${saved} processed${errored>0?`, ${errored} failed`:""}` });
+      const dupes   = d.duplicates || 0;
+      const errored = (d.errors || 0);
+      let msg = `✅ ${saved} saved`;
+      if (dupes > 0) msg += `, ${dupes} duplicate${dupes>1?"s":""} skipped`;
+      if (errored > 0) msg += `, ${errored} failed`;
+      setUploadProgress({ total: files.length, done: saved + dupes, current: msg });
+      // Show duplicate details if any
+      if (d.duplicateDetails && d.duplicateDetails.length > 0) {
+        setTimeout(() => alert("⚠️ Duplicate candidates skipped:
+
+" + d.duplicateDetails.join("
+")), 500);
+      }
       await fetchCandidates();
-      setTimeout(() => setUploadProgress(null), 3000);
+      setTimeout(() => setUploadProgress(null), 4000);
     } catch(err) {
       setUploadProgress({ total: files.length, done: 0, current: "❌ Upload failed — please try again" });
       setTimeout(() => setUploadProgress(null), 4000);

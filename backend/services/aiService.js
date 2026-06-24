@@ -75,6 +75,14 @@ SCORING — 2 factors:
 
     const prompt = `You are a Senior Talent Acquisition expert. Analyze this CV for the role.
 
+CRITICAL NAME EXTRACTION RULE:
+- Extract ONLY the actual person's name from the CV content
+- Do NOT use the filename as the name
+- The name is usually at the top of the CV, often the largest text
+- If you cannot find a clear name, return "Unknown Candidate"
+- Common patterns: "John Smith", "PRIYA SHARMA", "Rajesh Kumar"
+- Ignore job titles, company names, years of experience in the name field
+
 JOB: ${jobTitle}${jobLevel ? `\nLEVEL: ${jobLevel}` : ''}${primarySkill ? `\nPRIMARY SKILL: ${primarySkill}` : ''}${requiredSkills.length ? `\nREQUIREMENTS: ${requiredSkills.join(', ')}` : ''}
 
 ${scoring}
@@ -90,7 +98,7 @@ For hiring manager: background, strengths, gaps, stability, hire/no-hire rationa
 Return ONLY valid JSON. No markdown. Start with { and end with }
 
 {
-  "name": "full name from resume",
+  "name": "full name from resume — extract from CV text, NOT from filename",
   "email": "email or empty string",
   "phone": "phone or empty string",
   "domain": "primary domain",

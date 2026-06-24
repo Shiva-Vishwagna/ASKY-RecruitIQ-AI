@@ -28,16 +28,37 @@ export default function DashboardPage() {
   useEffect(() => {
     async function load() {
       try {
+        const isAdmin = user.role === 'admin';
         const [analyticsRes, candidatesRes, jobsRes] = await Promise.all([
           API.get('/analytics'),
           API.get('/candidates'),
           API.get('/jobs'),
         ]);
         const s = analyticsRes.data.summary || {};
-        setStats({ totalJobs: s.totalJobs || 0, totalCandidates: s.totalCandidates || 0, avgScore: s.avgScore || 0, hireRate: s.hireRate || 0 });
-        const cands = candidatesRes.data.candidates || [];
-        setAllCandidates(cands);
-        setRecentCandidates([...cands].sort((a, b) => new Date(b.createdAt||0).getTime() - new Date(a.createdAt||0).getTime()).slice(0, 5));
+        const allCands = candidatesRes.data.candidates || [];
+
+        // Recruiters only see candidates they uploaded
+        const myCands = isAdmin
+          ? allCands
+          : allCands.filter((c: any) =>
+              c.uploadedBy === user._id ||
+              c.uploadedBy === user.id ||
+              c.uploadedByName === user.name
+            );
+
+        // Stats: admin sees all, recruiter sees own
+        const myAvgScore = myCands.length
+          ? Math.round(myCands.reduce((s: number, c: any) => s + (c.aiScore || c.score || 0), 0) / myCands.length)
+          : 0;
+        const myHired = myCands.filter((c: any) => c.status === 'hm_ready').length;
+        const myHireRate = myCands.length ? Math.round((myHired / myCands.length) * 100) : 0;
+
+        setStats(isAdmin
+          ? { totalJobs: s.totalJobs || 0, totalCandidates: s.totalCandidates || 0, avgScore: s.avgScore || 0, hireRate: s.hireRate || 0 }
+          : { totalJobs: jobsRes.data?.jobs?.length || jobsRes.data?.length || 0, totalCandidates: myCands.length, avgScore: myAvgScore, hireRate: myHireRate }
+        );
+        setAllCandidates(myCands);
+        setRecentCandidates([...myCands].sort((a: any, b: any) => new Date(b.createdAt||0).getTime() - new Date(a.createdAt||0).getTime()).slice(0, 5));
         setJobs(jobsRes.data.jobs || jobsRes.data || []);
       } catch {}
       finally { setLoading(false); }
@@ -79,11 +100,12 @@ export default function DashboardPage() {
     amber:  'bg-amber-50 text-amber-600 border-amber-100',
   };
 
+  const isAdmin = user.role === 'admin';
   const statCards = [
-    { label: 'Total Jobs',       value: stats.totalJobs,                icon: '💼', color: 'blue',    path: '/jobs',       sub: `${jobs.filter(j=>j.status==='open').length} open` },
-    { label: 'Total Candidates', value: stats.totalCandidates,          icon: '👥', color: 'purple',  path: '/candidates', sub: `${hmReady.length} HM ready` },
-    { label: 'Average AI Score', value: `${stats.avgScore||0}/100`,     icon: '🎯', color: 'emerald', path: '/analytics',  sub: `${allCandidates.filter(c=>(c.aiScore||c.score||0)>=80).length} scored 80+` },
-    { label: 'Hire Rate',        value: `${stats.hireRate}%`,           icon: '✅', color: 'amber',   path: '/analytics',  sub: 'Based on HM ready' },
+    { label: isAdmin ? 'Total Jobs' : 'Open Jobs',            value: stats.totalJobs,            icon: '💼', color: 'blue',    path: '/jobs',       sub: `${jobs.filter(j=>j.status==='open').length} open` },
+    { label: isAdmin ? 'Total Candidates' : 'My Candidates',  value: stats.totalCandidates,      icon: '👥', color: 'purple',  path: '/candidates', sub: `${hmReady.length} HM ready` },
+    { label: isAdmin ? 'Average AI Score' : 'My Avg Score',   value: `${stats.avgScore||0}/100`, icon: '🎯', color: 'emerald', path: '/analytics',  sub: `${allCandidates.filter(c=>(c.aiScore||c.score||0)>=80).length} scored 80+` },
+    { label: isAdmin ? 'Hire Rate' : 'My Hire Rate',          value: `${stats.hireRate}%`,       icon: '✅', color: 'amber',   path: '/analytics',  sub: isAdmin ? 'Based on HM ready' : 'Your candidates' },
   ];
 
   return (
@@ -92,7 +114,14 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="mb-6 flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Welcome back, {user.name?.split(' ')[0]} 👋</h1>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-3xl font-bold text-gray-900">Welcome back, {user.name?.split(' ')[0]} 👋</h1>
+            {user.role !== 'admin' && (
+              <span className="bg-blue-100 text-blue-700 text-xs font-bold px-3 py-1 rounded-full border border-blue-200">
+                👤 Recruiter View — Your Candidates Only
+              </span>
+            )}
+          </div>
           <p className="text-gray-400 mt-1 text-sm">{new Date().toLocaleDateString('en-IN', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}</p>
         </div>
         <button onClick={() => navigate('/pipeline')}

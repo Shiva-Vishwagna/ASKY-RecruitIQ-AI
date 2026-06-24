@@ -256,7 +256,7 @@ export default function JobsPage() {
                       onClick={() => navigate(`/jobs/${job._id}`)}>
                       {job.title}
                     </h3>
-                    
+                    {isAdmin && (
                       <>
                         <button onClick={e => { e.stopPropagation(); setEditingTitleId(job._id); setEditingTitleValue(job.title); }}
                           title="Edit title"

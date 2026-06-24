@@ -583,4 +583,68 @@ router.get('/:id/questions', protect, async (req, res) => {
   }
 });
 
+
+// ── POST /api/candidates/:id/notes ───────────────────────────────
+router.post('/:id/notes', protect, async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text?.trim()) return res.status(400).json({ message: 'Note text required' });
+    const candidate = await Candidate.findByIdAndUpdate(
+      req.params.id,
+      { $push: { notes: { text: text.trim(), createdBy: req.user.name, createdAt: new Date() } } },
+      { new: true }
+    );
+    if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
+    res.json({ notes: candidate.notes });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── DELETE /api/candidates/:id/notes/:noteId ─────────────────────
+router.delete('/:id/notes/:noteId', protect, async (req, res) => {
+  try {
+    const candidate = await Candidate.findByIdAndUpdate(
+      req.params.id,
+      { $pull: { notes: { _id: req.params.noteId } } },
+      { new: true }
+    );
+    res.json({ notes: candidate?.notes || [] });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── POST /api/candidates/bulk-rescreen ───────────────────────────
+router.post('/bulk-rescreen', protect, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Admins only' });
+    const zeroCandidates = await Candidate.find({ aiScore: { $in: [0, null] } }).select('_id name').limit(50);
+    res.json({ candidates: zeroCandidates, count: zeroCandidates.length, message: `Found ${zeroCandidates.length} candidates needing re-screen` });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── GET /api/candidates/check-duplicate ──────────────────────────
+router.get('/check-duplicate', protect, async (req, res) => {
+  try {
+    const { name, email } = req.query;
+    const query = [];
+    if (name) query.push({ name: new RegExp(name.trim(), 'i') });
+    if (email) query.push({ email: email.trim().toLowerCase() });
+    if (!query.length) return res.json({ duplicate: false });
+    const existing = await Candidate.findOne({ $or: query }).select('_id name email appliedFor createdAt');
+    res.json({ duplicate: !!existing, existing: existing || null });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── PATCH /api/candidates/:id/interview-date ─────────────────────
+router.patch('/:id/interview-date', protect, async (req, res) => {
+  try {
+    const { interviewDate, interviewNotes } = req.body;
+    const update = {};
+    if (interviewDate !== undefined) update.interviewDate = interviewDate ? new Date(interviewDate) : null;
+    if (interviewNotes !== undefined) update.interviewNotes = interviewNotes;
+    const candidate = await Candidate.findByIdAndUpdate(req.params.id, update, { new: true });
+    if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
+    await AuditLog.create({ user: req.user.name, userId: req.user._id, action: 'INTERVIEW_SCHEDULED', resource: 'candidates', details: `${candidate.name} | ${interviewDate}` }).catch(() => {});
+    res.json({ candidate });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
 module.exports = router;

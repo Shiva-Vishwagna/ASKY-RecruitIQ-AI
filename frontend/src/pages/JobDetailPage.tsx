@@ -99,13 +99,13 @@ export default function JobDetailPage() {
 
   // Question bank
   const [questionBank, setQuestionBank] = useState<{text:string;difficulty:"easy"|"medium"|"hard";category:string}[]>([]);
-  const [newQ, setNewQ]                 = useState({text:"",difficulty:"medium" as "easy"|"medium"|"hard",category:"Technical"});
+  const [newQ, setNewQ]                 = useState({text:"",difficulty:"medium" as const,category:"Technical"});
   const [savingBank, setSavingBank]     = useState(false);
   const [bankSaved, setBankSaved]       = useState(false);
   const [importing, setImporting]       = useState(false);
   const [importPreview, setImportPreview] = useState<string[]>([]);
   const [showImportPreview, setShowImportPreview] = useState(false);
-  const [importDifficulty, setImportDifficulty]   = useState<"easy"|"medium"|"hard">("medium");
+  const importDifficulty = "medium" as const;
   const [importCategory, setImportCategory]       = useState("Technical");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -280,13 +280,11 @@ export default function JobDetailPage() {
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Difficulty for all</label>
                 <div className="flex gap-2">
-                  {(["easy","medium","hard"] as const).map(d => (
-                    <button key={d} onClick={() => setImportDifficulty(d)}
-                      className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${importDifficulty === d ? DIFF_ACTIVE[d] : DIFF_COLORS[d]}`}>
-                      {d === "easy" ? "🟢" : d === "medium" ? "🟡" : "🔴"} {d}
-                    </button>
-                  ))}
+                  <div className="flex-1 py-2 rounded-xl text-xs font-bold border text-center bg-amber-500 text-white border-amber-500">
+                    🟡 Medium
+                  </div>
                 </div>
+                <p className="text-xs text-gray-400 mt-1">All uploaded questions set to Medium difficulty</p>
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Category for all</label>
@@ -515,18 +513,15 @@ export default function JobDetailPage() {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-4 gap-3 mb-5">
-            {[
-              {label:"Total",    value:questionBank.length, color:"text-gray-900",    bg:"bg-gray-50",     border:"border-gray-100"},
-              {label:"🟢 Easy",  value:easyCount,           color:"text-emerald-600", bg:"bg-emerald-50",  border:"border-emerald-100"},
-              {label:"🟡 Medium",value:mediumCount,         color:"text-amber-600",   bg:"bg-amber-50",    border:"border-amber-100"},
-              {label:"🔴 Hard",  value:hardCount,           color:"text-red-600",     bg:"bg-red-50",      border:"border-red-100"},
-            ].map(s => (
-              <div key={s.label} className={`${s.bg} border ${s.border} rounded-2xl p-4 text-center`}>
-                <div className={`text-2xl font-black ${s.color}`}>{s.value}</div>
-                <div className="text-xs text-gray-500 mt-1 font-medium">{s.label}</div>
-              </div>
-            ))}
+          <div className="grid grid-cols-2 gap-3 mb-5">
+            <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 text-center">
+              <div className="text-2xl font-black text-gray-900">{questionBank.length}</div>
+              <div className="text-xs text-gray-500 mt-1 font-medium">Total</div>
+            </div>
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 text-center">
+              <div className="text-2xl font-black text-amber-600">{mediumCount}</div>
+              <div className="text-xs text-gray-500 mt-1 font-medium">🟡 Medium</div>
+            </div>
           </div>
 
           {/* Status message */}
@@ -573,13 +568,10 @@ export default function JobDetailPage() {
                   placeholder="Type your question here... (Ctrl+Enter to add)"
                   rows={3}
                   className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"/>
-                <div className="grid grid-cols-3 gap-2">
-                  {(["easy","medium","hard"] as const).map(d => (
-                    <button key={d} onClick={() => setNewQ({...newQ, difficulty:d})}
-                      className={`py-2 rounded-xl text-xs font-bold border transition-all capitalize ${newQ.difficulty===d?DIFF_ACTIVE[d]:DIFF_COLORS[d]}`}>
-                      {d==="easy"?"🟢":d==="medium"?"🟡":"🔴"} {d}
-                    </button>
-                  ))}
+                <div className="grid grid-cols-1 gap-2">
+                  <div className="py-2 rounded-xl text-xs font-bold border text-center bg-amber-500 text-white border-amber-500">
+                    🟡 Medium — All questions added at Medium difficulty
+                  </div>
                 </div>
                 <select value={newQ.category} onChange={e => setNewQ({...newQ, category:e.target.value})}
                   className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">

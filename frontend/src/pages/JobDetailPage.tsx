@@ -280,6 +280,34 @@ export default function JobDetailPage() {
   const mediumCount = questionBank.filter(q => q.difficulty === "medium").length;
   const hardCount   = questionBank.filter(q => q.difficulty === "hard").length;
 
+  async function saveAsTemplate() {
+    if (!job) return;
+    if (!window.confirm(`Save "${job.title}" as a reusable template?`)) return;
+    try {
+      const r = await fetch(`${API}/jobs/${job._id}/duplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ asTemplate: true })
+      });
+      const d = await r.json();
+      if (r.ok) alert(`✅ Saved as template: "${d.job.title}"`);
+    } catch { alert('Failed to save template'); }
+  }
+
+  async function closeJobWithReason() {
+    if (!job) return;
+    const reason = prompt('Reason for closing this job?', 'Position filled');
+    if (reason === null) return;
+    try {
+      const r = await fetch(`${API}/jobs/${job._id}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ closeReason: reason })
+      });
+      if (r.ok) setJob({ ...job, status: 'closed', closeReason: reason } as Job);
+    } catch { alert('Failed to close job'); }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
 
@@ -722,41 +750,6 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
       setTab("screening");
     } catch { alert("Failed to generate AI questions."); }
     finally { setGeneratingQ(false); }
-  }
-
-  async function checkDuplicate(name: string, email: string): Promise<{duplicate: boolean; existing?: any}> {
-    try {
-      const r = await fetch(`${API}/candidates/check-duplicate?name=${encodeURIComponent(name)}&email=${encodeURIComponent(email)}`,
-        { headers: { Authorization: `Bearer ${token}` } });
-      return await r.json();
-    } catch { return { duplicate: false }; }
-  }
-
-  async function saveAsTemplate() {
-    if (!window.confirm(`Save "${job.title}" as a reusable template?`)) return;
-    try {
-      const r = await fetch(`${API}/jobs/${job._id}/duplicate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ asTemplate: true })
-      });
-      const d = await r.json();
-      if (r.ok) alert(`✅ Saved as template: "${d.job.title}"`);
-    } catch { alert('Failed to save template'); }
-  }
-
-  async function closeJobWithReason() {
-    const reason = prompt('Reason for closing this job?', 'Position filled');
-    if (reason === null) return;
-    try {
-      const r = await fetch(`${API}/jobs/${job._id}/close`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ closeReason: reason })
-      });
-      const d = await r.json();
-      if (r.ok && job) setJob({ ...job, status: 'closed', closeReason: reason } as Job);
-    } catch { alert('Failed to close job'); }
   }
 
   async function generateBankQuestions() {

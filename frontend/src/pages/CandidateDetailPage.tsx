@@ -555,7 +555,7 @@ export default function CandidateDetailPage() {
               )}
             </div>
             {cvScore===0 && (
-              <div className="text-xs text-amber-500 font-medium">⚠️ AI screening pending — click Run AI Screening</div>
+              <div className="text-xs text-amber-500 font-medium">⚠️ Click "Run AI Screening" to generate score</div>
             )}
           </div>
         </div>

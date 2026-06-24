@@ -645,6 +645,12 @@ export default function JobDetailPage() {
       {activeTab === "overview" && (
         <div className="p-6 max-w-3xl space-y-5">
           <div className="bg-white rounded-2xl p-6 border border-gray-100">
+            {job.status === 'closed' && (job as any).closeReason && (
+              <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 mb-4 flex items-center gap-2">
+                <span className="text-red-500">🔒</span>
+                <p className="text-sm text-red-700"><strong>Closed:</strong> {(job as any).closeReason}</p>
+              </div>
+            )}
             <h2 className="font-bold text-gray-900 text-lg mb-3">Job Description</h2>
             <p className="text-gray-600 leading-relaxed whitespace-pre-wrap">{job.description||"No description provided."}</p>
           </div>
@@ -715,6 +721,41 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
       setTab("screening");
     } catch { alert("Failed to generate AI questions."); }
     finally { setGeneratingQ(false); }
+  }
+
+  async function checkDuplicate(name: string, email: string): Promise<{duplicate: boolean; existing?: any}> {
+    try {
+      const r = await fetch(`${API}/candidates/check-duplicate?name=${encodeURIComponent(name)}&email=${encodeURIComponent(email)}`,
+        { headers: { Authorization: `Bearer ${token}` } });
+      return await r.json();
+    } catch { return { duplicate: false }; }
+  }
+
+  async function saveAsTemplate() {
+    if (!window.confirm(`Save "${job.title}" as a reusable template?`)) return;
+    try {
+      const r = await fetch(`${API}/jobs/${job._id}/duplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ asTemplate: true })
+      });
+      const d = await r.json();
+      if (r.ok) alert(`✅ Saved as template: "${d.job.title}"`);
+    } catch { alert('Failed to save template'); }
+  }
+
+  async function closeJobWithReason() {
+    const reason = prompt('Reason for closing this job?', 'Position filled');
+    if (reason === null) return;
+    try {
+      const r = await fetch(`${API}/jobs/${job._id}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ closeReason: reason })
+      });
+      const d = await r.json();
+      if (r.ok) setJob({ ...job, status: 'closed', closeReason: reason });
+    } catch { alert('Failed to close job'); }
   }
 
   async function generateBankQuestions() {

@@ -184,7 +184,7 @@ export default function AnalyticsPage() {
           { label:"HM Ready", value:hmReady, color:"text-emerald-600", bg:"bg-emerald-50", border:"border-emerald-100", icon:"🎯" },
           { label:"Avg Score", value:`${avgScore}`, color:"text-blue-600", bg:"bg-blue-50", border:"border-blue-100", icon:"⭐" },
           { label:"Hire Rate", value:`${hireRate}%`, color:"text-indigo-600", bg:"bg-indigo-50", border:"border-indigo-100", icon:"✅" },
-          { label:"Avg TTH", value:avgTTH ? `${avgTTH}d` : "—", color:"text-purple-600", bg:"bg-purple-50", border:"border-purple-100", icon:"⏱" },
+
           { label:"Screened", value:screened, color:"text-amber-600", bg:"bg-amber-50", border:"border-amber-100", icon:"🎙️" },
           { label:"Stuck", value:stuck, color:stuck>0?"text-red-600":"text-gray-400", bg:stuck>0?"bg-red-50":"bg-gray-50", border:stuck>0?"border-red-100":"border-gray-100", icon:"⚠️" },
           { label:"Open Jobs", value:openJobs, color:"text-teal-600", bg:"bg-teal-50", border:"border-teal-100", icon:"💼" },
@@ -264,21 +264,7 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          {/* Time to Hire */}
-          {tthValues.length > 0 && (
-            <div className="bg-white rounded-2xl p-6 border border-gray-100">
-              <h2 className="font-bold text-gray-900 mb-4">⏱️ Time to Hire Analysis</h2>
-              <div className="grid grid-cols-3 gap-4 mb-4">
-                {[{label:"Average",value:`${avgTTH} days`,color:"text-blue-600"},{label:"Fastest",value:`${minTTH} days`,color:"text-emerald-600"},{label:"Slowest",value:`${maxTTH} days`,color:"text-amber-600"}].map(s=>(
-                  <div key={s.label} className="bg-gray-50 rounded-xl p-4 text-center">
-                    <div className={`text-2xl font-black ${s.color}`}>{s.value}</div>
-                    <div className="text-xs text-gray-500 mt-1">{s.label}</div>
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-gray-400">Based on {tthValues.length} candidates who reached HM Ready status</p>
-            </div>
-          )}
+
 
           {/* Quick Insights */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -369,7 +355,7 @@ export default function AnalyticsPage() {
               </div>
               <table className="w-full">
                 <thead className="bg-gray-50">
-                  <tr>{["Role","Total","A-Tier","HM Ready","Avg Score","Avg TTH","Conv%",""].map(h=>(
+                  <tr>{["Role","Total","A-Tier","HM Ready","Avg Score","Conv%",""].map(h=>(
                     <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">{h}</th>
                   ))}</tr>
                 </thead>
@@ -383,7 +369,6 @@ export default function AnalyticsPage() {
                         <td className="px-4 py-4"><span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full">{r.aTier}</span></td>
                         <td className="px-4 py-4"><span className="text-xs font-bold bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full">{r.hmReady}</span></td>
                         <td className="px-4 py-4"><span className={`text-sm font-black ${r.avgScore>=80?"text-emerald-600":r.avgScore>=60?"text-blue-600":"text-amber-600"}`}>{r.avgScore||"—"}</span></td>
-                        <td className="px-4 py-4"><span className="text-sm text-gray-600">{r.avgTTH!=null?`${r.avgTTH}d`:"—"}</span></td>
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-2">
                             <div className="w-12 h-2 bg-gray-100 rounded-full">

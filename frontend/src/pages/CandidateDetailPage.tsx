@@ -158,7 +158,13 @@ export default function CandidateDetailPage() {
       });
       const d = await r.json();
       if (!r.ok) {
-        alert(d.message || "Re-screen failed. Please try again.");
+        if (r.status === 503 || (d.message || "").includes("rate limit")) {
+          alert("⚠️ AI providers are busy right now (rate limited). The system will auto-retry in 10 seconds. Please try again in 1 minute.");
+        } else if ((d.message || "").includes("Not enough")) {
+          alert("❌ Not enough data to re-screen. Please re-upload the candidate's CV file for a fresh screening.");
+        } else {
+          alert(d.message || "Re-screen failed. Please try again in a moment.");
+        }
         return;
       }
       // Fully replace candidate with fresh data from server
@@ -166,11 +172,12 @@ export default function CandidateDetailPage() {
       if (fresh) {
         setCandidate(fresh);
         if (fresh.status === "hm_ready") setHmDone(true);
+        if (fresh.interviewDate) setInterviewDate(fresh.interviewDate.substring(0, 10));
       }
       // Reload page data to reflect all updated scores
       await load();
     } catch(err) {
-      alert("Re-screen failed. Please try again.");
+      alert("Re-screen failed — network error. Please try again.");
     } finally {
       setRescreenLoading(false);
     }

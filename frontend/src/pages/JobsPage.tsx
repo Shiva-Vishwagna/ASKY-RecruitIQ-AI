@@ -300,7 +300,12 @@ export default function JobsPage() {
                   </div>
                 )}
                 <div className="mt-4 pt-4 border-t border-gray-50 flex items-center justify-between">
-                  <span className="bg-blue-50 text-blue-700 text-sm font-semibold px-3 py-1 rounded-full">{job.candidateCount || 0} candidates</span>
+                  <div className="flex items-center gap-2">
+                    <span className="bg-blue-50 text-blue-700 text-sm font-semibold px-3 py-1 rounded-full">{job.candidateCount || 0} candidates</span>
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${ (job as any).roleType === "non_technical" ? "bg-amber-50 text-amber-700" : "bg-blue-100 text-blue-700" }`}>
+                      {(job as any).roleType === "non_technical" ? "🤝 Non-Tech" : "💻 Technical"}
+                    </span>
+                  </div>
                   {job.status === "closed" ? (
                     <span className="text-red-400 text-xs font-semibold">Position Closed</span>
                   ) : job.status === "on-hold" ? (

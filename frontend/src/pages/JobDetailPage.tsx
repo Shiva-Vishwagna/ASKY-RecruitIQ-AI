@@ -126,6 +126,9 @@ export default function JobDetailPage() {
 
   const API   = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
+  const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+  const isAdmin = currentUser?.role === "admin";
+  const MAX_UPLOAD = isAdmin ? 50 : 10;
 
   useEffect(() => { fetchJob(); fetchCandidates(); }, [id]);
 
@@ -150,6 +153,11 @@ export default function JobDetailPage() {
   async function handleResumeUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files?.length) return;
+    if (files.length > MAX_UPLOAD) {
+      alert(`You can upload a maximum of ${MAX_UPLOAD} CVs at once.${!isAdmin ? " Contact your admin to upload more." : ""}`);
+      e.target.value = "";
+      return;
+    }
     setUploading(true);
     const fd = new FormData();
     Array.from(files).forEach((f: File) => fd.append("resumes", f));
@@ -387,8 +395,8 @@ export default function JobDetailPage() {
             <span className={`px-3 py-1 rounded-full text-sm font-semibold capitalize ${job.status==="open"?"bg-emerald-100 text-emerald-700":"bg-gray-100 text-gray-600"}`}>{job.status}</span>
             <ShareJobButton jobId={id||""} jobTitle={job.title} department={job.department} location={job.location}/>
             <label className={`bg-blue-600 text-white px-4 py-2 rounded-xl font-semibold cursor-pointer hover:bg-blue-700 transition-all text-sm ${uploading?"opacity-60 pointer-events-none":""}`}>
-              {uploading?"⏳ Uploading...":"📎 Upload Resumes"}
-              <input type="file" multiple accept=".pdf,.doc,.docx" onChange={handleResumeUpload} className="hidden"/>
+              {uploading ? "⏳ Uploading..." : isAdmin ? "📎 Upload Resumes" : "📎 Upload Resumes (max 10)"}
+              <input type="file" multiple accept=".pdf,.doc,.docx" onChange={handleResumeUpload} className="hidden" title={`Max ${MAX_UPLOAD} files`}/>
             </label>
           </div>
         </div>

@@ -169,7 +169,7 @@ Return ONLY valid JSON. No markdown. Start with { and end with }
 // ─────────────────────────────────────────────────────────────────
 // CALCULATE CV SCORE
 // ─────────────────────────────────────────────────────────────────
-function calculateCVScore(breakdown, roleType = 'technical') {
+function calculateCVScore(breakdown, roleType = 'technical', domainMismatch = false) {
   if (!breakdown) return 0;
 
   const isTech = roleType !== 'non_technical';
@@ -179,7 +179,15 @@ function calculateCVScore(breakdown, roleType = 'technical') {
   const skillScore = Math.min(breakdown.skillsMatchScore || 0, 100);
   const stabilityScore = Math.min(breakdown.stabilityScore || 0, 100);
 
-  const score = Math.round(skillScore * skillWeight + stabilityScore * stabilityWeight);
+  let score = Math.round(skillScore * skillWeight + stabilityScore * stabilityWeight);
+
+  // Domain mismatch penalty — heavy penalty when candidate background doesn't match role type
+  // e.g. Technical candidate for Non-Technical role or vice versa
+  if (domainMismatch) {
+    score = Math.round(score * 0.5); // 50% penalty for domain mismatch
+    console.log(`[calculateCVScore] Domain mismatch penalty applied: ${score * 2} → ${score}`);
+  }
+
   return Math.min(score, 100);
 }
 

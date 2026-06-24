@@ -107,60 +107,18 @@ app.get('/api/health', function(req, res) {
   });
 });
 
-app.get('/api/ai-test', async function(req, res) {
-  // Check all configured providers
-  var providers = {
-    groq_keys: [],
-    gemini_keys: [],
-    cohere: !!process.env.COHERE_API_KEY,
+app.get('/api/ai-test', function(req, res) {
+  var envStatus = {
+    GROQ_API_KEY: !!process.env.GROQ_API_KEY,
+    MONGODB_URI: !!process.env.MONGODB_URI,
+    JWT_SECRET: !!process.env.JWT_SECRET,
+    FRONTEND_URL: process.env.FRONTEND_URL || 'not set'
   };
-
-  for (var i = 1; i <= 5; i++) {
-    var key = i === 1 ? process.env.GROQ_API_KEY : process.env['GROQ_API_KEY_' + i];
-    if (key) providers.groq_keys.push('Key ' + i + ' ✅');
-  }
-  for (var j = 1; j <= 2; j++) {
-    var gkey = j === 1 ? process.env.GEMINI_API_KEY : process.env['GEMINI_API_KEY_' + j];
-    if (gkey) providers.gemini_keys.push('Key ' + j + ' ✅');
-  }
-
-  // Test first available GROQ key
-  var aiTest = 'No providers configured';
-  var activeKey = process.env.GROQ_API_KEY;
-  if (activeKey) {
-    var models = ['llama-3.3-70b-versatile', 'llama3-8b-8192', 'gemma2-9b-it'];
-    for (var m = 0; m < models.length; m++) {
-      try {
-        var fr = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + activeKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: models[m], messages: [{ role: 'user', content: 'say ok' }], max_tokens: 5 })
-        });
-        if (fr.status === 429) { aiTest = '⚠️ ' + models[m] + ' rate limited'; continue; }
-        if (!fr.ok) { aiTest = '❌ ' + models[m] + ': HTTP ' + fr.status; continue; }
-        var fd = await fr.json();
-        aiTest = '✅ ' + models[m] + ': ' + (fd.choices[0]?.message?.content || '').substring(0, 10);
-        break;
-      } catch(e) { aiTest = '❌ ' + models[m] + ': ' + e.message.substring(0, 40); }
-    }
-  }
-
-  var totalCapacity = providers.groq_keys.length * (1000 + 14400 + 14400) +
-                      providers.gemini_keys.length * 1500;
-
+  var groqTest = 'not tested';
   res.json({
-    ai_test: aiTest,
-    providers: providers,
-    estimated_daily_capacity: totalCapacity + ' requests/day across all keys',
+    environment: envStatus,
+    groq: groqTest,
     db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    env: {
-      groq_keys_count: providers.groq_keys.length,
-      gemini_keys_count: providers.gemini_keys.length,
-      cohere: providers.cohere,
-      mongodb_uri: !!process.env.MONGODB_URI,
-      frontend_url: process.env.FRONTEND_URL || 'not set',
-      jwt_secret: !!process.env.JWT_SECRET
-    },
     timestamp: new Date().toISOString()
   });
 });
@@ -172,6 +130,67 @@ app.get('/', function(req, res) {
     status: 'online',
     timestamp: new Date().toISOString()
   });
+});
+
+// ── ARIA Chat Route ───────────────────────────────────────────────
+app.post('/api/aria/chat', async function(req, res) {
+  try {
+    const { message, userName, context } = req.body;
+    if (!message) return res.status(400).json({ error: 'Message required' });
+
+    const systemPrompt = `You are ARIA (AI Recruitment Intelligence Assistant), a helpful HR and recruitment assistant built into the ASKY RecruitIQ platform.
+
+Current platform context:
+- Total candidates: ${context?.totalCandidates || 0}
+- Open jobs: ${context?.openJobs || 0}  
+- HM Ready candidates: ${context?.hmReady || 0}
+- User: ${userName || 'Recruiter'}
+
+You help with:
+1. General HR and recruitment advice
+2. Interview question suggestions
+3. Job description writing tips
+4. Recruitment best practices
+5. Understanding recruitment metrics
+6. Candidate evaluation guidance
+
+Keep responses concise (3-5 sentences max) and practical.
+Do NOT make up specific candidate data — only use the context provided.
+Always be professional and helpful.`;
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'llama3-8b-8192',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: message }
+        ],
+        temperature: 0.5,
+        max_tokens: 300
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      if (response.status === 429) {
+        return res.json({ reply: "I'm a bit busy right now (rate limit reached). Your pipeline questions still work perfectly though! Try asking about your candidates or jobs." });
+      }
+      return res.json({ reply: "I couldn't get an answer right now. Try asking about your recruitment pipeline instead!" });
+    }
+
+    const data = await response.json();
+    const reply = data.choices[0]?.message?.content || "I'm not sure about that. Try asking about your pipeline!";
+    res.json({ reply });
+
+  } catch (err) {
+    console.error('[ARIA chat]', err.message);
+    res.json({ reply: "I'm having trouble connecting right now. Your pipeline questions still work perfectly!" });
+  }
 });
 
 app.use(function(req, res) {

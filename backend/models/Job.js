@@ -20,6 +20,10 @@ const jobSchema = new mongoose.Schema({
   requiredSkills: [{ type: String }],
   minAiScore:     { type: Number, default: 60 },
 
+  closeReason:    { type: String, default: '' },
+  closedAt:       { type: Date },
+  isTemplate:     { type: Boolean, default: false },
+
   // Question Bank
   questionBank: [{
     text:       { type: String, maxlength: 400 },

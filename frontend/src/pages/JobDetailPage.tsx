@@ -852,6 +852,36 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
               </button>
             </div>
 
+            {/* ── Domain Mismatch Warning ── */}
+            {candidate.riskFlags?.domainMismatch && (
+              <div className="bg-red-50 border-2 border-red-200 rounded-2xl p-5 mb-2">
+                <div className="flex items-start gap-3">
+                  <span className="text-2xl">🚫</span>
+                  <div>
+                    <p className="font-bold text-red-800 text-sm mb-1">Domain Mismatch — Questions Blocked</p>
+                    <p className="text-xs text-red-600 leading-relaxed">
+                      This is a <strong>{job.roleType === "non_technical" ? "Non-Technical" : "Technical"}</strong> role but the candidate appears to have a <strong>{job.roleType === "non_technical" ? "Technical/IT" : "Non-Technical"}</strong> background.
+                      AI has already applied a score penalty. Generating questions is not recommended as the role fit is poor.
+                    </p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full font-semibold">AI Score Penalised ⚠️</span>
+                      <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full font-semibold">Not Recommended for Screening</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Block questions if domain mismatch */}
+            {candidate.riskFlags?.domainMismatch ? (
+              <div className="bg-gray-50 rounded-2xl border border-gray-200 p-8 text-center">
+                <div className="text-4xl mb-3">🚫</div>
+                <p className="font-bold text-gray-600 mb-2">Question Generation Blocked</p>
+                <p className="text-sm text-gray-400">This candidate's background does not match the role type. Their CV score has been penalised due to domain mismatch.</p>
+                <p className="text-xs text-gray-400 mt-2">If you believe this is incorrect, contact your Admin to review the role type setting.</p>
+              </div>
+            ) : (<>
+
             {/* ── AI MODE ── */}
             {questionMode==="ai" && (
               <div className="bg-blue-50 rounded-2xl border border-blue-100 p-5 space-y-4">
@@ -906,6 +936,7 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
                 <p className="text-xs text-center text-purple-400">✅ Each session picks different questions — no repeats from last session</p>
               </div>
             )}
+            </>)}
 
             {/* Bank not available warning */}
             {questionMode==="bank" && !bankAvailable && (

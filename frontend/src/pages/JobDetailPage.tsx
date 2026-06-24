@@ -110,6 +110,7 @@ export default function JobDetailPage() {
   const [stageFilter, setStageFilter] = useState("all");
   const [loading, setLoading]       = useState(true);
   const [uploading, setUploading]   = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{total:number;done:number;current:string} | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
 
   // Question bank
@@ -155,17 +156,25 @@ export default function JobDetailPage() {
     if (!files?.length) return;
     if (files.length > MAX_UPLOAD) {
       alert(`You can upload a maximum of ${MAX_UPLOAD} CVs at once.${!isAdmin ? " Contact your admin to upload more." : ""}`);
-      e.target.value = "";
-      return;
+      e.target.value = ""; return;
     }
     setUploading(true);
+    setUploadProgress({ total: files.length, done: 0, current: "Preparing files..." });
     const fd = new FormData();
     Array.from(files).forEach((f: File) => fd.append("resumes", f));
     fd.append("jobId", id||""); fd.append("jobTitle", job?.title||"");
     try {
-      await fetch(`${API}/resumes/upload`, { method:"POST", headers:{Authorization:`Bearer ${token}`}, body:fd });
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      setUploadProgress({ total: files.length, done: 0, current: `Uploading ${files.length} CV${files.length>1?"s":""}...` });
+      const r = await fetch(`${API}/resumes/upload`, { method:"POST", headers:{Authorization:`Bearer ${token}`}, body:fd });
+      const d = await r.json();
+      const saved   = (d.candidates||[]).filter((c:any) => c._id).length;
+      const errored = (d.candidates||[]).filter((c:any) => c.error).length;
+      setUploadProgress({ total: files.length, done: saved, current: `✅ ${saved} processed${errored>0?`, ${errored} failed`:""}` });
       await fetchCandidates();
+      setTimeout(() => setUploadProgress(null), 3000);
+    } catch(err) {
+      setUploadProgress({ total: files.length, done: 0, current: "❌ Upload failed — please try again" });
+      setTimeout(() => setUploadProgress(null), 4000);
     } finally { setUploading(false); e.target.value=""; }
   }
 
@@ -395,11 +404,24 @@ export default function JobDetailPage() {
             <span className={`px-3 py-1 rounded-full text-sm font-semibold capitalize ${job.status==="open"?"bg-emerald-100 text-emerald-700":"bg-gray-100 text-gray-600"}`}>{job.status}</span>
             <ShareJobButton jobId={id||""} jobTitle={job.title} department={job.department} location={job.location}/>
             <label className={`bg-blue-600 text-white px-4 py-2 rounded-xl font-semibold cursor-pointer hover:bg-blue-700 transition-all text-sm ${uploading?"opacity-60 pointer-events-none":""}`}>
-              {uploading ? "⏳ Uploading..." : isAdmin ? "📎 Upload Resumes" : "📎 Upload Resumes (max 10)"}
+              {uploading ? `⏳ AI Processing${uploadProgress ? ` ${uploadProgress.done}/${uploadProgress.total}` : "..."}` : isAdmin ? "📎 Upload Resumes" : "📎 Upload Resumes (max 10)"}
               <input type="file" multiple accept=".pdf,.doc,.docx" onChange={handleResumeUpload} className="hidden" title={`Max ${MAX_UPLOAD} files`}/>
             </label>
           </div>
         </div>
+          {/* Upload Progress */}
+          {uploadProgress && (
+            <div className="mt-3 mx-6 bg-blue-50 rounded-xl p-3 border border-blue-100">
+              <div className="flex justify-between text-xs text-blue-700 mb-1.5 font-medium">
+                <span>{uploadProgress.current}</span>
+                <span>{uploadProgress.done}/{uploadProgress.total} files</span>
+              </div>
+              <div className="h-2 bg-blue-100 rounded-full overflow-hidden">
+                <div className="h-2 bg-blue-500 rounded-full transition-all duration-700"
+                  style={{width: uploadProgress.done > 0 ? `${Math.round((uploadProgress.done/uploadProgress.total)*100)}%` : "15%"}}/>
+              </div>
+            </div>
+          )}
       </div>
 
       {/* Tabs */}

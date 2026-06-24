@@ -420,6 +420,147 @@ router.post('/:id/hm-report', protect, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────
+// POST /api/candidates/:id/transcript-screen
+// Process Webex/Teams/Zoom transcript and score answers
+// ─────────────────────────────────────────────────────────────────
+router.post('/:id/transcript-screen', protect, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { transcript, questions, sessionType = 'ai_generated', difficulty = 'medium', meetingSource = 'webex' } = req.body;
+
+    if (!transcript || !transcript.trim()) {
+      return res.status(400).json({ message: 'Transcript text is required' });
+    }
+    if (!questions || questions.length === 0) {
+      return res.status(400).json({ message: 'No questions found. Please generate questions first.' });
+    }
+
+    const candidate = await Candidate.findById(id);
+    if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
+
+    console.log(`[transcript-screen] Processing ${meetingSource} transcript for ${candidate.name} — ${questions.length} questions`);
+
+    // Build AI prompt to extract answers from transcript
+    const questionsList = questions.map((q, idx) => (idx+1) + '. ' + q).join('\n');
+    const prompt = `You are analyzing a job interview transcript to extract and score candidate answers.
+
+INTERVIEW QUESTIONS ASKED:
+${questionsList}
+
+MEETING TRANSCRIPT:
+${transcript.substring(0, 6000)}
+
+TASK:
+1. Find the candidate's answer to each question in the transcript
+2. If a question wasn't answered, note "Not answered in transcript"
+3. Score each answer from 0-100 based on: accuracy, depth, relevance, clarity
+4. Give brief feedback for each answer
+
+Return ONLY this JSON (no markdown):
+{
+  "answers": [
+    {
+      "question": "question text",
+      "extractedAnswer": "candidate's answer from transcript",
+      "score": 75,
+      "feedback": "Brief feedback on the answer"
+    }
+  ],
+  "overallScore": 72,
+  "transcriptQuality": "good/partial/poor",
+  "notes": "Any observations about the interview"
+}`;
+
+    let scoringResult = null;
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.2,
+          max_tokens: 2000
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const text = data.choices[0]?.message?.content || '{}';
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) scoringResult = JSON.parse(jsonMatch[0]);
+      }
+    } catch (aiErr) {
+      console.error('[transcript-screen AI error]', aiErr.message);
+    }
+
+    // Build session from AI result or fallback
+    const answersData = scoringResult?.answers || questions.map((q, i) => ({
+      question: q,
+      extractedAnswer: 'Could not extract from transcript',
+      score: 0,
+      feedback: 'Answer extraction failed'
+    }));
+
+    const overallScore = scoringResult?.overallScore ||
+      Math.round(answersData.reduce((s, a) => s + (a.score || 0), 0) / answersData.length);
+
+    const session = {
+      sessionType,
+      difficulty,
+      conductedAt: new Date(),
+      conductedBy: req.user.name,
+      meetingSource,
+      transcriptUsed: true,
+      answers: answersData.map((a, i) => ({
+        question: a.question || questions[i] || '',
+        userAnswer: a.extractedAnswer || '',
+        aiScore: a.score || 0,
+        aiFeedback: a.feedback || ''
+      })),
+      screeningScore: overallScore,
+      screeningBreakdown: { transcriptQuality: scoringResult?.transcriptQuality, notes: scoringResult?.notes }
+    };
+
+    if (!candidate.screeningSessions) candidate.screeningSessions = [];
+    candidate.screeningSessions.push(session);
+    candidate.screeningScore = overallScore;
+    candidate.status = 'answers_submitted';
+    await candidate.save();
+
+    await AuditLog.create({
+      user: req.user.name,
+      userId: req.user._id,
+      action: 'TRANSCRIPT_SCREENED',
+      resource: 'candidates',
+      details: `${candidate.name} | ${meetingSource} transcript | Score: ${overallScore}`
+    }).catch(() => {});
+
+    console.log(`[transcript-screen] ✅ ${candidate.name} scored ${overallScore}/100 from transcript`);
+
+    res.json({
+      message: 'Transcript processed successfully',
+      session,
+      overallScore,
+      screeningScore: overallScore,
+      transcriptQuality: scoringResult?.transcriptQuality || 'unknown',
+      candidate: {
+        _id: candidate._id,
+        screeningScore: candidate.screeningScore,
+        status: candidate.status
+      }
+    });
+
+  } catch (err) {
+    console.error('[POST /transcript-screen]', err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────
 // GET /api/candidates/:id/questions
 // Fetch stored interview questions for candidate
 // ─────────────────────────────────────────────────────────────────

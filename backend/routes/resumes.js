@@ -101,7 +101,12 @@ router.post('/upload', protect, (req, res) => {
           if (!ai) {
             console.error('[upload] AI screening returned null for:', file.originalname, '— saving with basic info');
             // Save candidate with basic info even when AI fails
-            const fallbackName = file.originalname.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+            const fallbackName = file.originalname
+              .replace(/\.[^/.]+$/, '')
+              .replace(/[_\-]/g, ' ')
+              .replace(/\b(resume|cv|curriculum vitae)\b/gi, '')
+              .replace(/\s+/g, ' ')
+              .trim() || 'Unknown Candidate';
             try {
               const fallbackCandidate = await Candidate.create({
                 name:       fallbackName,
@@ -148,7 +153,15 @@ router.post('/upload', protect, (req, res) => {
 
           // ── Save candidate ────────────────────────────────
           const candidate = await Candidate.create({
-            name:            trunc(ai.name || '', 100) || file.originalname.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' '),
+            name:            trunc(ai.name || '', 100) || (() => {
+              // Clean up filename: remove extension, underscores, "Resume", "CV" etc
+              return file.originalname
+                .replace(/\.[^/.]+$/, '')
+                .replace(/[_\-]/g, ' ')
+                .replace(/\b(resume|cv|curriculum vitae)\b/gi, '')
+                .replace(/\s+/g, ' ')
+                .trim() || 'Unknown Candidate';
+            })(),
             email:           trunc(ai.email  || '', 100),
             phone:           trunc(ai.phone  || '', 20),
             appliedFor:      trunc(req.body.jobTitle || jobContext.title || '', 100),

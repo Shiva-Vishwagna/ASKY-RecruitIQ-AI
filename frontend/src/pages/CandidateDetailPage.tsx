@@ -36,6 +36,18 @@ interface Candidate {
   technicalExperience?: string; leadershipExperience?: string; cloudExpertise?: string;
   roleType?: string;
   jobId?: { roleType?: string; scoringWeights?: { cvWeight: number; screeningWeight: number } };
+  // Added fields
+  notes?: { _id?: string; text: string; createdBy: string; createdAt: string }[];
+  interviewDate?: string;
+  interviewNotes?: string;
+  source?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  companiesWorkedAt?: number;
+  averageTenureYears?: number;
+  shortTenureCompanies?: string[];
+  projectDomains?: string[];
+  uploadedByName?: string;
 }
 
 // ── Constants ─────────────────────────────────────────────────

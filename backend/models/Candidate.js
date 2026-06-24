@@ -82,6 +82,10 @@ const CandidateSchema = new mongoose.Schema({
   primarySkillScore: { type: Number, min: 0, max: 100 },
   jobFitScore:       { type: Number, min: 0, max: 100 },
 
+  notes:               [{ text: { type: String }, createdBy: { type: String }, createdAt: { type: Date, default: Date.now } }],
+  interviewDate:       { type: Date },
+  interviewNotes:      { type: String, default: '' },
+  source:              { type: String, default: 'Direct' },
   companiesWorkedAt:    { type: Number, default: 0 },
   shortTenureCompanies: [{ type: String }],
   averageTenureYears:   { type: Number, default: 0 },

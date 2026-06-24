@@ -50,6 +50,8 @@ export default function JobsPage() {
   const token = localStorage.getItem("token");
   const user  = JSON.parse(localStorage.getItem("user") || "{}");
   const isAdmin = user?.role === "admin";
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [showTemplates, setShowTemplates] = useState(false);
 
   async function loadTemplates() {
     try {

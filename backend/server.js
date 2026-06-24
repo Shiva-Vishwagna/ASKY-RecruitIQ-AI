@@ -108,51 +108,59 @@ app.get('/api/health', function(req, res) {
 });
 
 app.get('/api/ai-test', async function(req, res) {
-  var envStatus = {
-    GROQ_API_KEY: !!process.env.GROQ_API_KEY,
-    MONGODB_URI: !!process.env.MONGODB_URI,
-    JWT_SECRET: !!process.env.JWT_SECRET,
-    FRONTEND_URL: process.env.FRONTEND_URL || 'not set'
+  // Check all configured providers
+  var providers = {
+    groq_keys: [],
+    gemini_keys: [],
+    cohere: !!process.env.COHERE_API_KEY,
   };
-  var groqTest = 'not set';
-  if (process.env.GROQ_API_KEY) {
-    const models = ['llama-3.3-70b-versatile', 'llama3-8b-8192', 'gemma2-9b-it'];
-    for (const model of models) {
+
+  for (var i = 1; i <= 5; i++) {
+    var key = i === 1 ? process.env.GROQ_API_KEY : process.env['GROQ_API_KEY_' + i];
+    if (key) providers.groq_keys.push('Key ' + i + ' ✅');
+  }
+  for (var j = 1; j <= 2; j++) {
+    var gkey = j === 1 ? process.env.GEMINI_API_KEY : process.env['GEMINI_API_KEY_' + j];
+    if (gkey) providers.gemini_keys.push('Key ' + j + ' ✅');
+  }
+
+  // Test first available GROQ key
+  var aiTest = 'No providers configured';
+  var activeKey = process.env.GROQ_API_KEY;
+  if (activeKey) {
+    var models = ['llama-3.3-70b-versatile', 'llama3-8b-8192', 'gemma2-9b-it'];
+    for (var m = 0; m < models.length; m++) {
       try {
-        const fetchResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        var fr = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: model,
-            messages: [{ role: 'user', content: 'Reply with just the word: ok' }],
-            max_tokens: 5
-          })
+          headers: { 'Authorization': 'Bearer ' + activeKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: models[m], messages: [{ role: 'user', content: 'say ok' }], max_tokens: 5 })
         });
-        if (fetchResponse.status === 429) {
-          groqTest = '⚠️ ' + model + ' rate limited — trying next...';
-          continue;
-        }
-        if (!fetchResponse.ok) {
-          const errText = await fetchResponse.text();
-          groqTest = '❌ ' + model + ': HTTP ' + fetchResponse.status;
-          continue;
-        }
-        const data = await fetchResponse.json();
-        const reply = data.choices[0]?.message?.content || '';
-        groqTest = '✅ Connected via ' + model + ': ' + reply.substring(0, 10);
+        if (fr.status === 429) { aiTest = '⚠️ ' + models[m] + ' rate limited'; continue; }
+        if (!fr.ok) { aiTest = '❌ ' + models[m] + ': HTTP ' + fr.status; continue; }
+        var fd = await fr.json();
+        aiTest = '✅ ' + models[m] + ': ' + (fd.choices[0]?.message?.content || '').substring(0, 10);
         break;
-      } catch (groqErr) {
-        groqTest = '❌ Error on ' + model + ': ' + groqErr.message.substring(0, 50);
-      }
+      } catch(e) { aiTest = '❌ ' + models[m] + ': ' + e.message.substring(0, 40); }
     }
   }
+
+  var totalCapacity = providers.groq_keys.length * (1000 + 14400 + 14400) +
+                      providers.gemini_keys.length * 1500;
+
   res.json({
-    environment: envStatus,
-    groq: groqTest,
+    ai_test: aiTest,
+    providers: providers,
+    estimated_daily_capacity: totalCapacity + ' requests/day across all keys',
     db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    env: {
+      groq_keys_count: providers.groq_keys.length,
+      gemini_keys_count: providers.gemini_keys.length,
+      cohere: providers.cohere,
+      mongodb_uri: !!process.env.MONGODB_URI,
+      frontend_url: process.env.FRONTEND_URL || 'not set',
+      jwt_secret: !!process.env.JWT_SECRET
+    },
     timestamp: new Date().toISOString()
   });
 });

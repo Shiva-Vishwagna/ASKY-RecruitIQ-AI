@@ -116,29 +116,37 @@ app.get('/api/ai-test', async function(req, res) {
   };
   var groqTest = 'not set';
   if (process.env.GROQ_API_KEY) {
-    try {
-      const fetchResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [{ role: 'user', content: 'Reply with just the word: ok' }],
-          max_tokens: 5
-        })
-      });
-      if (!fetchResponse.ok) {
-        const errText = await fetchResponse.text();
-        groqTest = '❌ HTTP ' + fetchResponse.status + ': ' + errText.substring(0, 60);
-      } else {
+    const models = ['llama-3.3-70b-versatile', 'llama3-8b-8192', 'gemma2-9b-it'];
+    for (const model of models) {
+      try {
+        const fetchResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [{ role: 'user', content: 'Reply with just the word: ok' }],
+            max_tokens: 5
+          })
+        });
+        if (fetchResponse.status === 429) {
+          groqTest = '⚠️ ' + model + ' rate limited — trying next...';
+          continue;
+        }
+        if (!fetchResponse.ok) {
+          const errText = await fetchResponse.text();
+          groqTest = '❌ ' + model + ': HTTP ' + fetchResponse.status;
+          continue;
+        }
         const data = await fetchResponse.json();
         const reply = data.choices[0]?.message?.content || '';
-        groqTest = '✅ Connected: ' + reply.substring(0, 20);
+        groqTest = '✅ Connected via ' + model + ': ' + reply.substring(0, 10);
+        break;
+      } catch (groqErr) {
+        groqTest = '❌ Error on ' + model + ': ' + groqErr.message.substring(0, 50);
       }
-    } catch (groqErr) {
-      groqTest = '❌ Error: ' + groqErr.message.substring(0, 80);
     }
   }
   res.json({

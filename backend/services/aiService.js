@@ -10,9 +10,9 @@
 // ─────────────────────────────────────────────────────────────────
 const { callWithFallback } = require('./multiAiProviders');
 
-// Legacy alias - keeps backward compatibility
+// Calls multiAiProviders chain - auto-fallback across 16 providers
 async function callGroq(messages, maxTokens = 2000) {
-  return callAI(messages, maxTokens);
+  return callWithFallback(messages, maxTokens);
 }
 
 // ─────────────────────────────────────────────────────────────────

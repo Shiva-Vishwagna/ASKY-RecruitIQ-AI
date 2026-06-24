@@ -137,6 +137,15 @@ export default function CandidateDetailPage() {
       if (c.status === "hm_ready") setHmDone(true);
       if (c.interviewDate) setInterviewDate(c.interviewDate.substring(0, 10));
       if (c.interviewNotes) setInterviewNotes(c.interviewNotes);
+      // If roleType missing, fetch from job
+      if (!c.roleType && c.jobId && typeof c.jobId === 'string') {
+        try {
+          const jr = await fetch(`${API}/jobs/${c.jobId}`, { headers:{ Authorization:`Bearer ${token}` }});
+          const jd = await jr.json();
+          const jobRoleType = (jd.job || jd)?.roleType;
+          if (jobRoleType) setCandidate((p:any) => p ? {...p, roleType: jobRoleType} : p);
+        } catch {}
+      }
     } finally { setLoading(false); }
   }
 

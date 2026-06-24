@@ -4,27 +4,68 @@
  * Handles all AI operations using Groq API via direct HTTP
  */
 
-// Direct GROQ API call - bypasses SDK version issues
+// GROQ models in priority order - automatic fallback on rate limit
+// llama-3.3-70b-versatile: 1,000 RPD (best quality)
+// llama3-8b-8192: 14,400 RPD (fast, good quality)
+// gemma2-9b-it: 14,400 RPD, 15,000 TPM (backup)
+const GROQ_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama3-8b-8192',
+  'gemma2-9b-it'
+];
+
 async function callGroq(messages, maxTokens = 2000) {
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
-      messages: messages,
-      temperature: 0.3,
-      max_tokens: maxTokens
-    })
-  });
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error('GROQ API error: ' + response.status + ' ' + err.substring(0, 100));
+  let lastError = null;
+
+  for (const model of GROQ_MODELS) {
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: messages,
+          temperature: 0.3,
+          max_tokens: maxTokens
+        })
+      });
+
+      if (response.status === 429) {
+        // Rate limited — try next model
+        console.warn('[callGroq] Rate limited on ' + model + ' — trying next model...');
+        lastError = new Error('Rate limited on ' + model);
+        continue;
+      }
+
+      if (!response.ok) {
+        const err = await response.text();
+        const errMsg = 'GROQ error on ' + model + ': ' + response.status + ' ' + err.substring(0, 100);
+        console.warn('[callGroq] ' + errMsg);
+        lastError = new Error(errMsg);
+        continue;
+      }
+
+      const data = await response.json();
+      const result = data.choices[0]?.message?.content || '';
+
+      if (model !== GROQ_MODELS[0]) {
+        console.log('[callGroq] ✅ Used fallback model: ' + model);
+      }
+
+      return result;
+
+    } catch (err) {
+      console.warn('[callGroq] Exception on ' + model + ': ' + err.message);
+      lastError = err;
+      continue;
+    }
   }
-  const data = await response.json();
-  return data.choices[0]?.message?.content || '';
+
+  // All models failed
+  throw lastError || new Error('All GROQ models failed');
 }
 
 // ─────────────────────────────────────────────────────────────────

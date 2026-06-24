@@ -604,12 +604,9 @@ export default function JobDetailPage() {
                     <textarea value={q.text} onChange={e => updateQuestion(idx,"text",e.target.value)}
                       rows={2} className="w-full text-sm text-gray-800 font-medium bg-transparent border-0 focus:outline-none resize-none p-0"/>
                     <div className="flex gap-2 mt-2">
-                      <select value={q.difficulty} onChange={e => updateQuestion(idx,"difficulty",e.target.value)}
-                        className={`text-xs font-bold px-2.5 py-1 rounded-full border cursor-pointer focus:outline-none ${DIFF_COLORS[q.difficulty]}`}>
-                        <option value="easy">🟢 Easy</option>
-                        <option value="medium">🟡 Medium</option>
-                        <option value="hard">🔴 Hard</option>
-                      </select>
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-100 text-amber-700 border-amber-200">
+                        🟡 Medium
+                      </span>
                       <select value={q.category} onChange={e => updateQuestion(idx,"category",e.target.value)}
                         className="text-xs text-gray-500 bg-gray-50 border border-gray-200 px-2.5 py-1 rounded-full cursor-pointer focus:outline-none">
                         {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -709,7 +706,8 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
   async function generateBankQuestions() {
     setGeneratingQ(true);
     try {
-      const url  = `${API}/jobs/${job._id}/question-bank/random${bankDifficulty!=="all"?`?difficulty=${bankDifficulty}`:""}`;
+      // Always use medium, add shuffle=true and timestamp to prevent caching/repeating
+      const url  = `${API}/jobs/${job._id}/question-bank/random?difficulty=medium&shuffle=true&t=${Date.now()}`;
       const res  = await fetch(url, { headers:{Authorization:`Bearer ${token}`} });
       const data = await res.json();
       if (!res.ok) { alert(data.message||"Could not load questions from bank."); return; }
@@ -886,40 +884,26 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
               <div className="bg-purple-50 rounded-2xl border border-purple-100 p-5 space-y-4">
                 <div>
                   <p className="text-sm font-bold text-purple-900 mb-1">📋 Pick 8 random questions from this job's question bank</p>
-                  <p className="text-xs text-purple-600">{job.questionBank?.length||0} questions in bank · Shuffled and picked randomly each time</p>
+                  <p className="text-xs text-purple-600">{job.questionBank?.filter(q=>q.difficulty==="medium").length||0} medium questions in bank · 7 picked randomly, no repeats</p>
                 </div>
 
-                {/* Bank difficulty counts */}
-                <div className="grid grid-cols-3 gap-2">
-                  {(["easy","medium","hard"] as const).map(d => {
-                    const count = job.questionBank?.filter(q=>q.difficulty===d).length||0;
-                    return (
-                      <div key={d} className={`rounded-xl p-3 text-center border ${DIFF_COLORS[d]}`}>
-                        <div className="font-black text-lg">{count}</div>
-                        <div className="text-xs capitalize font-medium mt-0.5">{d}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Filter by difficulty */}
-                <div>
-                  <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Filter questions by difficulty (optional)</p>
-                  <div className="flex gap-2">
-                    {(["all","easy","medium","hard"] as const).map(d => (
-                      <button key={d} onClick={() => setBankDifficulty(d)}
-                        className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${bankDifficulty===d?"bg-purple-600 text-white border-purple-600":"border-gray-200 text-gray-600 hover:border-purple-300"}`}>
-                        {d==="all"?"All":d==="easy"?"🟢 Easy":d==="medium"?"🟡 Med":"🔴 Hard"}
-                      </button>
-                    ))}
+                {/* Bank stats - total only */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl p-3 text-center border bg-gray-50 border-gray-100">
+                    <div className="font-black text-lg text-gray-900">{job.questionBank?.length||0}</div>
+                    <div className="text-xs text-gray-500 font-medium mt-0.5">Total Questions</div>
+                  </div>
+                  <div className="rounded-xl p-3 text-center border bg-amber-50 border-amber-100">
+                    <div className="font-black text-lg text-amber-600">{job.questionBank?.filter(q=>q.difficulty==="medium").length||0}</div>
+                    <div className="text-xs text-amber-600 font-medium mt-0.5">🟡 Medium</div>
                   </div>
                 </div>
 
                 <button onClick={generateBankQuestions} disabled={generatingQ}
                   className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 transition-all disabled:opacity-60">
-                  {generatingQ?"⏳ Loading...":"🎲 Pick 8 Random Questions from Bank"}
+                  {generatingQ?"⏳ Shuffling questions...":"🎲 Pick 7 Random Medium Questions"}
                 </button>
-                <p className="text-xs text-center text-purple-400">Questions are shuffled randomly each time you click</p>
+                <p className="text-xs text-center text-purple-400">✅ Each session picks different questions — no repeats from last session</p>
               </div>
             )}
 

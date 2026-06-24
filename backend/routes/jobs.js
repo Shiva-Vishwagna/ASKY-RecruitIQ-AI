@@ -217,4 +217,36 @@ router.get('/:id/question-bank/random', protect, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+
+// ── POST /api/jobs/:id/close ─────────────────────────────────────
+router.post('/:id/close', protect, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Admins only' });
+    const { closeReason } = req.body;
+    const job = await Job.findByIdAndUpdate(req.params.id, { status: 'closed', closeReason: closeReason || '', closedAt: new Date() }, { new: true });
+    if (!job) return res.status(404).json({ message: 'Job not found' });
+    res.json({ job });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── POST /api/jobs/:id/duplicate (save as template) ──────────────
+router.post('/:id/duplicate', protect, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: 'Admins only' });
+    const source = await Job.findById(req.params.id).lean();
+    if (!source) return res.status(404).json({ message: 'Job not found' });
+    const { _id, createdAt, updatedAt, candidateCount, ...rest } = source;
+    const newJob = await Job.create({ ...rest, title: rest.title + ' (Copy)', status: 'open', createdBy: req.user._id, isTemplate: req.body.asTemplate || false });
+    res.status(201).json({ job: newJob });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── GET /api/jobs/templates ───────────────────────────────────────
+router.get('/templates/list', protect, async (req, res) => {
+  try {
+    const templates = await Job.find({ isTemplate: true }).select('title department level roleType primarySkill requiredSkills').sort({ createdAt: -1 });
+    res.json({ templates });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
 module.exports = router;

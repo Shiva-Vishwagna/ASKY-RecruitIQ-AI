@@ -107,20 +107,44 @@ app.get('/api/health', function(req, res) {
   });
 });
 
-app.get('/api/ai-test', function(req, res) {
-  var envStatus = {
-    GROQ_API_KEY: !!process.env.GROQ_API_KEY,
-    MONGODB_URI: !!process.env.MONGODB_URI,
-    JWT_SECRET: !!process.env.JWT_SECRET,
-    FRONTEND_URL: process.env.FRONTEND_URL || 'not set'
-  };
-  var groqTest = 'not tested';
-  res.json({
-    environment: envStatus,
-    groq: groqTest,
-    db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    timestamp: new Date().toISOString()
-  });
+app.get('/api/ai-test', async function(req, res) {
+  try {
+    const { callWithFallback, getProviderStatus } = require('./services/multiAiProviders');
+    const status = getProviderStatus();
+
+    var liveTest = 'not tested';
+    try {
+      const result = await callWithFallback([{ role: 'user', content: 'Reply with just: ok' }], 10);
+      liveTest = '✅ Live: ' + (result || 'ok').substring(0, 30);
+    } catch (e) {
+      liveTest = '❌ All providers failed: ' + e.message.substring(0, 80);
+    }
+
+    res.json({
+      live_test: liveTest,
+      totalProviders: status.totalProviders,
+      activeProviders: status.activeProviders,
+      providerList: status.providerList,
+      estimatedDailyCapacity: status.estimatedDailyCapacity,
+      db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      env: {
+        groq_key_1: !!process.env.GROQ_API_KEY,
+        groq_key_2: !!process.env.GROQ_API_KEY_2,
+        groq_key_3: !!process.env.GROQ_API_KEY_3,
+        gemini: !!process.env.GEMINI_API_KEY,
+        openrouter: !!process.env.OPENROUTER_API_KEY,
+        cerebras: !!process.env.CEREBRAS_API_KEY,
+        sambanova: !!process.env.SAMBANOVA_API_KEY,
+        cohere: !!process.env.COHERE_API_KEY,
+        mongodb: !!process.env.MONGODB_URI,
+        frontend_url: process.env.FRONTEND_URL || 'not set',
+        jwt_secret: !!process.env.JWT_SECRET
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message, timestamp: new Date().toISOString() });
+  }
 });
 
 app.get('/', function(req, res) {

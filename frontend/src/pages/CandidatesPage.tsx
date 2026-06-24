@@ -482,11 +482,7 @@ export default function CandidatesPage() {
         </div>
         <div className="flex gap-3">
           <button onClick={fetchCandidates} className="border border-gray-200 bg-white text-gray-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-gray-50 text-sm">↻ Refresh</button>
-          {isAdmin && (
-            <button onClick={bulkRescreen} className="border border-amber-200 bg-amber-50 text-amber-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-amber-100 text-sm">
-              🔄 Bulk Re-screen
-            </button>
-          )}
+
           <button onClick={exportCSV} className="border border-gray-200 bg-white text-gray-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-gray-50 text-sm">↓ Export CSV</button>
         </div>
       </div>

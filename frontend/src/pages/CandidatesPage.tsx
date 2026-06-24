@@ -449,7 +449,6 @@ export default function CandidatesPage() {
 
   const getStatusInfo = (status?: string) => STATUSES.find(s => s.value === (status || "cv_uploaded")) || STATUSES[0];
 
-  const isAdmin = user?.role === 'admin';
 
   async function bulkRescreen() {
     if (!window.confirm('Re-run AI screening on all unscored candidates (score = 0)?')) return;

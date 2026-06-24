@@ -181,9 +181,17 @@ export default function JobsPage() {
           <h1 className="text-3xl font-bold text-gray-900">Job Postings</h1>
           <p className="text-gray-500 mt-1">Manage all open and closed positions</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-sm">
-          + Create New Job
-        </button>
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <button onClick={() => { loadTemplates(); setShowTemplates(true); }}
+              className="bg-gray-100 text-gray-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-gray-200 transition-all text-sm">
+              📋 Templates
+            </button>
+          )}
+          <button onClick={() => setShowModal(true)} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-sm">
+            + Create New Job
+          </button>
+        </div>
       </div>
 
       {/* Search + Filter */}
@@ -248,33 +256,7 @@ export default function JobsPage() {
                       onClick={() => navigate(`/jobs/${job._id}`)}>
                       {job.title}
                     </h3>
-                    {isAdmin && (<>
-          <button onClick={() => { loadTemplates(); setShowTemplates(true); }}
-            className="bg-gray-100 text-gray-700 px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-gray-200 transition-all flex items-center gap-2">
-            📋 Templates
-          </button>
-          {showTemplates && (
-            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowTemplates(false)}>
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
-                <h3 className="font-bold text-gray-900 text-lg mb-4">📋 Job Templates</h3>
-                {templates.length === 0 ? (
-                  <p className="text-gray-400 text-sm text-center py-6">No templates yet. Save a job as template from the job detail page.</p>
-                ) : (
-                  <div className="space-y-2 max-h-80 overflow-y-auto">
-                    {templates.map((t: any) => (
-                      <button key={t._id} onClick={() => createFromTemplate(t)}
-                        className="w-full text-left p-4 bg-gray-50 hover:bg-blue-50 rounded-xl border border-gray-100 hover:border-blue-200 transition-all">
-                        <div className="font-semibold text-gray-900 text-sm">{t.title}</div>
-                        <div className="text-xs text-gray-400 mt-0.5">{t.department} · {t.level} · {t.roleType === 'non_technical' ? 'Non-Tech' : 'Technical'}</div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <button onClick={() => setShowTemplates(false)} className="mt-4 w-full bg-gray-100 text-gray-600 py-2 rounded-xl text-sm font-semibold hover:bg-gray-200">Close</button>
-              </div>
-            </div>
-          )}
-        </>
+                    
                       <>
                         <button onClick={e => { e.stopPropagation(); setEditingTitleId(job._id); setEditingTitleValue(job.title); }}
                           title="Edit title"

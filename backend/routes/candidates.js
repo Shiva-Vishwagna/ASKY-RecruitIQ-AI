@@ -130,39 +130,137 @@ router.delete('/:id', protect, async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────
 // POST /api/candidates/:id/rescreen
-// Re-run AI screening on candidate with new context
+// Re-run full AI scoring using candidate's stored profile data
 // ─────────────────────────────────────────────────────────────────
 router.post('/:id/rescreen', protect, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const candidate = await Candidate.findById(id);
+    const candidate = await Candidate.findById(id).populate('jobId');
     if (!candidate) {
       return res.status(404).json({ message: 'Candidate not found' });
     }
 
-    // TODO: Get candidate's CV/resume text from somewhere
-    // For now, we'll re-analyze with stored data
-    
-    console.log(`[rescreen] Running AI rescreen for ${candidate.name}`);
-    
-    // Update the candidate with rescreen timestamp
-    candidate.rescreenedAt = new Date();
+    console.log(`[rescreen] Re-scoring ${candidate.name} using stored profile data`);
+
+    // Build a rich text summary from stored candidate data to re-run AI on
+    const profileText = [
+      `Name: ${candidate.name}`,
+      candidate.email ? `Email: ${candidate.email}` : '',
+      candidate.phone ? `Phone: ${candidate.phone}` : '',
+      candidate.seniority ? `Seniority: ${candidate.seniority}` : '',
+      candidate.experienceYears ? `Experience: ${candidate.experienceYears} years` : '',
+      candidate.domain ? `Domain: ${candidate.domain}` : '',
+      (candidate.topSkills||[]).length ? `Skills: ${candidate.topSkills.join(', ')}` : '',
+      (candidate.frameworks||[]).length ? `Frameworks: ${candidate.frameworks.join(', ')}` : '',
+      (candidate.databases||[]).length ? `Databases: ${candidate.databases.join(', ')}` : '',
+      (candidate.tools||[]).length ? `Tools: ${candidate.tools.join(', ')}` : '',
+      candidate.technicalExperience ? `Technical Background: ${candidate.technicalExperience}` : '',
+      candidate.leadershipExperience ? `Leadership: ${candidate.leadershipExperience}` : '',
+      candidate.companiesWorkedAt ? `Companies Worked At: ${candidate.companiesWorkedAt}` : '',
+      candidate.averageTenureYears ? `Average Tenure: ${candidate.averageTenureYears} years` : '',
+      (candidate.shortTenureCompanies||[]).length ? `Short Tenure Companies: ${candidate.shortTenureCompanies.join(', ')}` : '',
+      (candidate.projectDomains||[]).length ? `Project Domains: ${candidate.projectDomains.join(', ')}` : '',
+      (candidate.strengths||[]).length ? `Strengths: ${candidate.strengths.join(', ')}` : '',
+      (candidate.gaps||[]).length ? `Gaps: ${candidate.gaps.join(', ')}` : '',
+      candidate.summary ? `Summary: ${candidate.summary}` : '',
+    ].filter(Boolean).join('\n');
+
+
+    if (!profileText || profileText.length < 50) {
+      return res.status(400).json({ 
+        message: 'Not enough candidate data to re-screen. Please re-upload the CV file.' 
+      });
+    }
+
+    // Get job context
+    const jobContext = candidate.jobId && typeof candidate.jobId === 'object'
+      ? {
+          title: candidate.appliedFor || candidate.jobTitle || 'General Role',
+          roleType: candidate.jobId.roleType || 'technical',
+          primarySkill: candidate.jobId.primarySkill || '',
+          requiredSkills: candidate.jobId.requiredSkills || [],
+          level: candidate.jobId.level || '',
+        }
+      : {
+          title: candidate.appliedFor || candidate.jobTitle || 'General Role',
+          roleType: 'technical',
+        };
+
+    // Run full AI screening
+    const ai = await screenResumeWithAI(profileText, jobContext);
+
+    if (!ai) {
+      return res.status(503).json({ 
+        message: 'AI screening failed — all providers are rate limited. Try again in a minute.' 
+      });
+    }
+
+    // Detect domain mismatch
+    const roleType = jobContext.roleType || 'technical';
+    const candidateSkillsText = (candidate.topSkills || []).join(' ').toLowerCase();
+    const isTechCandidate = /java|python|react|node|sql|aws|cloud|developer|engineer|software|backend|frontend|devops|api/i.test(candidateSkillsText);
+    const isNonTechRole = roleType === 'non_technical';
+    const domainMismatch = !!(ai.riskFlags?.domainMismatch) || (isNonTechRole && isTechCandidate);
+
+    const cvScore = calculateCVScore(ai.cvScoreBreakdown, roleType, domainMismatch);
+    const tier    = determineTier(cvScore);
+
+    // Update all fields
+    const num  = (v, max=100) => { const n = Number(v); return (isNaN(n)||n<0) ? 0 : Math.min(n, max); };
+    const arr  = (v, max=10) => Array.isArray(v) ? v.slice(0, max) : [];
+    const trunc = (s, max=500) => typeof s === 'string' ? s.substring(0, max) : '';
+
+    Object.assign(candidate, {
+      aiScore:      cvScore,
+      combinedScore: cvScore,
+      tier,
+      cvScoreBreakdown: {
+        skillsMatchScore: num(ai.cvScoreBreakdown?.skillsMatchScore),
+        stabilityScore:   num(ai.cvScoreBreakdown?.stabilityScore),
+      },
+      riskLevel:    trunc(ai.riskLevel || 'medium', 10),
+      riskFlags: {
+        frequentJobChanges:    !!ai.riskFlags?.frequentJobChanges,
+        noticePeriodRisk:      trunc(ai.riskFlags?.noticePeriodRisk || '', 100),
+        missingMandatorySkills: arr(ai.riskFlags?.missingMandatorySkills, 5).map(s => trunc(s, 50)),
+        domainMismatch:        domainMismatch,
+      },
+      recommendation: trunc(ai.recommendation || 'Consider', 20),
+      recommendationReason: trunc(ai.recommendationReason || '', 300),
+      summary:       trunc(ai.summary || '', 500),
+      hmSummary:     trunc(ai.hmSummary || '', 800),
+      strengths:     arr(ai.strengths, 4).map(s => trunc(s, 200)),
+      gaps:          arr(ai.gaps, 4).map(s => trunc(s, 200)),
+      interviewFocusAreas: arr(ai.interviewFocusAreas, 5).map(s => trunc(s, 200)),
+      topSkills:     arr(ai.topSkills || candidate.topSkills, 10).map(s => trunc(s, 50)),
+      skillScores:   arr(ai.skillScores, 8).map(s => ({ skill: trunc(s.skill||'', 50), score: num(s.score) })),
+      databases:     arr(ai.databases || candidate.databases, 8).map(s => trunc(s, 50)),
+      frameworks:    arr(ai.frameworks || candidate.frameworks, 8).map(s => trunc(s, 50)),
+      tools:         arr(ai.tools || candidate.tools, 8).map(s => trunc(s, 50)),
+      status:        'ai_screened',
+      rescreenedAt:  new Date(),
+    });
+
     await candidate.save();
 
-    // Audit log
     await AuditLog.create({
       user: req.user.name,
       userId: req.user._id,
       action: 'CANDIDATE_RESCREENED',
       resource: 'candidates',
-      details: `${candidate.name} - AI rescreen initiated`
+      details: `${candidate.name} | Score: ${cvScore} | ${tier}`
     }).catch(() => {});
 
+    console.log(`[rescreen] ✅ ${candidate.name} rescreened — Score: ${cvScore} | ${tier}`);
+
     res.json({ 
-      message: 'Candidate rescreen initiated',
-      candidate 
+      message: 'Re-screen complete',
+      candidate,
+      cvScore,
+      tier
     });
+
   } catch (err) {
     console.error('[POST /rescreen]', err.message);
     res.status(500).json({ message: err.message });

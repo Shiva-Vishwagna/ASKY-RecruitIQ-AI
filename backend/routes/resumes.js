@@ -114,7 +114,7 @@ router.post('/upload', protect, (req, res) => {
                 status:     'cv_uploaded',
                 uploadedBy: req.user._id,
                 uploadedByName: trunc(req.user.name, 50),
-                summary:    'AI screening pending — GROQ API key may need to be refreshed in Render environment.',
+                summary:    'CV uploaded — click Run AI Screening to generate scores and insights.',
               });
               results.push(fallbackCandidate);
               console.log('[upload] Saved fallback candidate:', fallbackName);

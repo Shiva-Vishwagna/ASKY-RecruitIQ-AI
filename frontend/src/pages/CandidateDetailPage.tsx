@@ -95,6 +95,12 @@ export default function CandidateDetailPage() {
   const [genLoading, setGenLoading]   = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [transcriptMode, setTranscriptMode] = useState<"manual"|"transcript">("manual");
+  const [newNote, setNewNote] = useState("");
+  const [noteLoading, setNoteLoading] = useState(false);
+  const [interviewDate, setInterviewDate] = useState("");
+  const [interviewNotes, setInterviewNotes] = useState("");
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleSaved, setScheduleSaved] = useState(false);
   const [transcriptText, setTranscriptText] = useState("");
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [transcriptFile, setTranscriptFile] = useState<File|null>(null);
@@ -117,6 +123,8 @@ export default function CandidateDetailPage() {
       setCandidate(c);
       setQuestions(c.interviewQuestions || []);
       if (c.status === "hm_ready") setHmDone(true);
+      if (c.interviewDate) setInterviewDate(c.interviewDate.substring(0, 10));
+      if (c.interviewNotes) setInterviewNotes(c.interviewNotes);
     } finally { setLoading(false); }
   }
 
@@ -185,6 +193,48 @@ export default function CandidateDetailPage() {
       setCandidate(p => p ? {...p, interviewQuestions:qs, status:"questions_sent"} : p);
       setTab("screening");
     } finally { setGenLoading(false); }
+  }
+
+  async function addNote() {
+    if (!newNote.trim()) return;
+    setNoteLoading(true);
+    try {
+      const r = await fetch(`${API}/candidates/${id}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ text: newNote.trim() })
+      });
+      const d = await r.json();
+      if (r.ok) {
+        setCandidate(p => p ? { ...p, notes: d.notes } : p);
+        setNewNote("");
+      }
+    } finally { setNoteLoading(false); }
+  }
+
+  async function deleteNote(noteId: string) {
+    if (!window.confirm("Delete this note?")) return;
+    const r = await fetch(`${API}/candidates/${id}/notes/${noteId}`, {
+      method: "DELETE", headers: { Authorization: `Bearer ${token}` }
+    });
+    const d = await r.json();
+    if (r.ok) setCandidate(p => p ? { ...p, notes: d.notes } : p);
+  }
+
+  async function saveInterviewSchedule() {
+    setScheduleLoading(true);
+    try {
+      const r = await fetch(`${API}/candidates/${id}/interview-date`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ interviewDate, interviewNotes })
+      });
+      if (r.ok) {
+        setScheduleSaved(true);
+        setCandidate(p => p ? { ...p, interviewDate, interviewNotes } : p);
+        setTimeout(() => setScheduleSaved(false), 3000);
+      }
+    } finally { setScheduleLoading(false); }
   }
 
   async function uploadTranscript() {
@@ -604,6 +654,8 @@ export default function CandidateDetailPage() {
             { key:"generate",    label:"Generate Questions"                                     },
             { key:"screening",   label:`Screening${questions.length>0?` (${questions.length}Q)`:""}`},
             { key:"sessions",    label:`Sessions${sessions.length>0?` (${sessions.length})`:""}`},
+            { key:"notes",      label:`📝 Notes${(candidate.notes?.length||0)>0?` (${candidate.notes?.length})`:""}` },
+            { key:"timeline",   label:"⏱️ Timeline" },
             { key:"hm-report",   label:`📋 HM Report${candidate.status==="hm_ready"?" ✓":""}` },
           ].map(t=>(
             <button key={t.key} onClick={()=>setTab(t.key)}
@@ -1267,6 +1319,109 @@ Example format:
         )}
 
         {/* HM REPORT */}
+        {tab==="notes" && (
+          <div className="space-y-4">
+            {/* Add note */}
+            <div className="bg-white rounded-2xl p-5 border border-gray-100">
+              <h3 className="font-bold text-gray-900 mb-3">📝 Add Note</h3>
+              <textarea value={newNote} onChange={e => setNewNote(e.target.value)}
+                rows={3} placeholder="Type your note, observation or follow-up here..."
+                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"/>
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-gray-400">Notes are visible to all recruiters on this candidate</span>
+                <button onClick={addNote} disabled={!newNote.trim() || noteLoading}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 disabled:opacity-50">
+                  {noteLoading ? "Saving..." : "Add Note"}
+                </button>
+              </div>
+            </div>
+
+            {/* Notes list */}
+            {(candidate.notes?.length || 0) === 0 ? (
+              <div className="bg-gray-50 rounded-2xl p-10 text-center border border-gray-100">
+                <div className="text-4xl mb-3">📝</div>
+                <p className="font-bold text-gray-500">No notes yet</p>
+                <p className="text-sm text-gray-400 mt-1">Add observations, call notes, or follow-ups above</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {[...(candidate.notes||[])].reverse().map((note: any, i: number) => (
+                  <div key={note._id || i} className="bg-white rounded-2xl p-4 border border-gray-100">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold">
+                          {note.createdBy?.charAt(0)?.toUpperCase()}
+                        </div>
+                        <div>
+                          <span className="text-sm font-semibold text-gray-900">{note.createdBy}</span>
+                          <span className="text-xs text-gray-400 ml-2">{new Date(note.createdAt).toLocaleString('en-IN', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}</span>
+                        </div>
+                      </div>
+                      <button onClick={() => deleteNote(note._id)}
+                        className="text-gray-300 hover:text-red-500 text-xs transition-colors">🗑</button>
+                    </div>
+                    <p className="text-sm text-gray-700 leading-relaxed pl-9">{note.text}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Interview scheduling */}
+            <div className="bg-blue-50 rounded-2xl p-5 border border-blue-100">
+              <h3 className="font-bold text-blue-900 mb-3">📅 Schedule Interview</h3>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs font-bold text-blue-700 mb-1">Interview Date</label>
+                  <input type="date" value={interviewDate} onChange={e => setInterviewDate(e.target.value)}
+                    className="w-full border border-blue-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"/>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-blue-700 mb-1">Notes (optional)</label>
+                  <input type="text" value={interviewNotes} onChange={e => setInterviewNotes(e.target.value)}
+                    placeholder="e.g. Video call, Panel interview..."
+                    className="w-full border border-blue-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"/>
+                </div>
+              </div>
+              <button onClick={saveInterviewSchedule} disabled={scheduleLoading}
+                className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${scheduleSaved ? "bg-emerald-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700"} disabled:opacity-50`}>
+                {scheduleLoading ? "Saving..." : scheduleSaved ? "✅ Saved!" : "💾 Save Schedule"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {tab==="timeline" && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-2xl p-5 border border-gray-100">
+              <h3 className="font-bold text-gray-900 mb-4">⏱️ Candidate Activity Timeline</h3>
+              <div className="relative">
+                <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-100"/>
+                {[
+                  { icon:"📄", label:"CV Uploaded", color:"bg-gray-100 text-gray-600", date: candidate.createdAt, detail: `Applied for ${candidate.appliedFor || candidate.jobTitle || "—"}` },
+                  candidate.aiScore ? { icon:"🤖", label:"AI Screened", color:"bg-blue-100 text-blue-700", date: candidate.updatedAt, detail: `CV Score: ${candidate.aiScore}/100 · ${candidate.tier}` } : null,
+                  (candidate.interviewQuestions?.length||0)>0 ? { icon:"❓", label:"Questions Generated", color:"bg-purple-100 text-purple-700", date: candidate.updatedAt, detail: `${candidate.interviewQuestions?.length} questions sent` } : null,
+                  candidate.screeningScore ? { icon:"✍️", label:"Answers Submitted", color:"bg-amber-100 text-amber-700", date: candidate.updatedAt, detail: `Screening Score: ${candidate.screeningScore}/100` } : null,
+                  candidate.status === "hm_ready" ? { icon:"🎯", label:"HM Ready", color:"bg-emerald-100 text-emerald-700", date: candidate.updatedAt, detail: `Combined Score: ${candidate.combinedScore}/100 · ${candidate.recommendation}` } : null,
+                  candidate.status === "rejected" ? { icon:"❌", label:"Rejected", color:"bg-red-100 text-red-700", date: candidate.updatedAt, detail: "Candidate was rejected" } : null,
+                  candidate.interviewDate ? { icon:"📅", label:"Interview Scheduled", color:"bg-indigo-100 text-indigo-700", date: candidate.interviewDate, detail: candidate.interviewNotes || "Interview date set" } : null,
+                  ...(candidate.notes||[]).map((n:any) => ({ icon:"📝", label:`Note by ${n.createdBy}`, color:"bg-gray-100 text-gray-600", date: n.createdAt, detail: n.text.substring(0, 80) + (n.text.length > 80 ? "..." : "") }))
+                ].filter(Boolean).sort((a:any,b:any) => new Date(a.date||0).getTime() - new Date(b.date||0).getTime()).map((event:any, i:number) => (
+                  <div key={i} className="flex gap-4 mb-5 relative">
+                    <div className={`w-8 h-8 rounded-full ${event.color} flex items-center justify-center text-sm flex-shrink-0 z-10`}>{event.icon}</div>
+                    <div className="flex-1 pt-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold text-gray-900">{event.label}</span>
+                        <span className="text-xs text-gray-400">{event.date ? new Date(event.date).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'2-digit', hour:'2-digit', minute:'2-digit' }) : "—"}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-0.5">{event.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {tab==="hm-report" && (
           <div className="bg-white rounded-2xl p-6 border border-gray-100">
             <h2 className="font-bold text-gray-900 text-lg mb-2">📋 Choose Report for Hiring Manager</h2>

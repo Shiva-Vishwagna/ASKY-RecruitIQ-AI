@@ -208,7 +208,7 @@ async function generateInterviewQuestions(config = {}) {
     experience = 0,
     domain = 'General',
     difficulty = 'medium',
-    count = 5
+    count = 7
   } = config;
 
   try {
@@ -216,24 +216,26 @@ async function generateInterviewQuestions(config = {}) {
                           : difficulty === 'hard' ? '6+ years level, system design'
                           : '3-5 years level, real scenarios';
 
-    const prompt = `Generate ${count} interview questions for ${candidateName}.
+    const prompt = `Generate exactly ${count} THEORY-BASED interview questions for ${candidateName}.
 
 Skills: ${skills.join(', ') || 'Not specified'}
 Experience: ${experience} years
 Domain: ${domain}
 Difficulty: ${difficulty} (${difficultyDesc})
 
-Requirements:
-1. Each question should be specific to the skills and experience level
-2. Questions should assess technical depth, problem-solving, and role fit
-3. Mix of conceptual and practical questions
-4. Clear, answerable questions
+CRITICAL RULES:
+1. ALL questions must be VERBAL/THEORY questions - suitable for phone or video call screening
+2. NO coding challenges, NO write-the-code questions, NO whiteboard tasks
+3. Questions should test understanding, concepts, real-world experience and decision making
+4. For Medium: scenario-based questions like "How would you handle X", "Explain your approach to Y", "Describe a time when Z"
+5. For Hard: architecture decisions, system design concepts, leadership scenarios, trade-off analysis
+6. Each question must be specific to the candidate's skills and experience level
+7. Generate EXACTLY ${count} questions - no more, no less
 
-Return ONLY JSON array, no markdown or extra text:
+Return ONLY a JSON array of strings, no markdown, no numbering:
 [
   "Question 1",
-  "Question 2",
-  ...
+  "Question 2"
 ]`;
 
     const response = await callGroq([{ role: 'user', content: prompt }], 1500) || '[]';

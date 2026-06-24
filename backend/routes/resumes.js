@@ -95,6 +95,29 @@ async function processFile(file, jobContext, roleType, user, jobId) {
     const cvScore = calculateCVScore(ai.cvScoreBreakdown, roleType, domainMismatch);
     const tier    = determineTier(cvScore);
 
+    // Step 3b: Duplicate detection — check by name AND email
+    const candidateName = trunc(ai.name || '', 100).trim();
+    if (candidateName && candidateName !== 'Unknown Candidate') {
+      const existing = await Candidate.findOne({
+        $or: [
+          { name: { $regex: new RegExp('^' + candidateName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '$', 'i') } },
+          ...(ai.email ? [{ email: ai.email.toLowerCase().trim() }] : [])
+        ]
+      }).select('_id name email appliedFor createdAt uploadedByName').lean();
+
+      if (existing) {
+        const uploadedDate = new Date(existing.createdAt).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+        const uploadedBy = existing.uploadedByName || 'Unknown';
+        console.log(`[upload] ⚠️ DUPLICATE: "${candidateName}" already exists (uploaded by ${uploadedBy} on ${uploadedDate})`);
+        return {
+          duplicate: true,
+          message: `Duplicate candidate: "${candidateName}" was already uploaded by ${uploadedBy} on ${uploadedDate}`,
+          existingId: existing._id,
+          file: name
+        };
+      }
+    }
+
     // Step 5: Save
     const candidate = await Candidate.create({
       name:            trunc(ai.name || cleanName(name), 100),
@@ -121,6 +144,7 @@ async function processFile(file, jobContext, roleType, user, jobId) {
         domainMismatch:         !!ai.riskFlags?.domainMismatch,
       },
       status:               'ai_screened',
+      roleType:             roleType,  // store job's roleType on candidate for correct tag display
       uploadedBy:           user._id,
       uploadedByName:       trunc(user.name, 50),
       summary:              trunc(ai.summary              || '', 500),
@@ -223,16 +247,23 @@ router.post('/upload', protect, (req, res) => {
         }
       }
 
-      const saved    = results.filter(r => r._id);
-      const errored  = results.filter(r => r.error);
+      const saved      = results.filter(r => r._id);
+      const errored    = results.filter(r => r.error && !r.duplicate);
+      const duplicates = results.filter(r => r.duplicate);
 
-      console.log(`[upload] ✅ Done: ${saved.length} saved, ${errored.length} errors`);
+      console.log(`[upload] ✅ Done: ${saved.length} saved, ${duplicates.length} duplicates, ${errored.length} errors`);
+
+      if (duplicates.length > 0) {
+        duplicates.forEach(d => console.log(`[upload] 🔁 Duplicate: ${d.message}`));
+      }
 
       res.json({
         candidates: results,
         count:      saved.length,
+        duplicates: duplicates.length,
         errors:     errored.length,
-        message:    `${saved.length} candidate(s) processed${errored.length > 0 ? `, ${errored.length} failed` : ''}`
+        duplicateDetails: duplicates.map(d => d.message),
+        message:    `${saved.length} candidate(s) saved${duplicates.length > 0 ? `, ${duplicates.length} duplicate(s) skipped` : ''}${errored.length > 0 ? `, ${errored.length} failed` : ''}`
       });
 
     } catch (err) {

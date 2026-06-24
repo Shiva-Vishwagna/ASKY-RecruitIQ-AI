@@ -26,6 +26,7 @@ export default function DashboardPage() {
   const user = JSON.parse(localStorage.getItem('user') || '{}');
   const [search, setSearch] = useState('');
   const [showSearch, setShowSearch] = useState(false);
+  const [recruiterFilter, setRecruiterFilter] = useState('all');
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -86,10 +87,37 @@ export default function DashboardPage() {
       ).slice(0, 8)
     : [];
 
-  const stuckCandidates  = allCandidates.filter(c => getDaysInStage(c) >= 5 && c.status !== 'rejected' && c.status !== 'hm_ready');
-  const pendingReview    = allCandidates.filter(c => c.status === 'answers_submitted');
-  const hmReady          = allCandidates.filter(c => c.status === 'hm_ready');
-  const highScoreEarly   = allCandidates.filter(c => (c.aiScore||c.score||0) >= 80 && (c.status === 'cv_uploaded' || c.status === 'ai_screened'));
+  // ── Recruiter Activity Stats (admin only) ───────────────────
+  const recruiterMap: Record<string, any> = {};
+  allCandidates.forEach((c: any) => {
+    const name = c.uploadedByName || c.uploadedBy || 'Unknown';
+    if (!recruiterMap[name]) recruiterMap[name] = {
+      name, uploads: 0, screened: 0, hmReady: 0, rejected: 0,
+      scores: [], latest: null, candidates: []
+    };
+    recruiterMap[name].uploads++;
+    if (c.screeningScore && c.screeningScore > 0) recruiterMap[name].screened++;
+    if (c.status === 'hm_ready') recruiterMap[name].hmReady++;
+    if (c.status === 'rejected') recruiterMap[name].rejected++;
+    if (c.aiScore) recruiterMap[name].scores.push(c.aiScore);
+    if (!recruiterMap[name].latest || new Date(c.createdAt) > new Date(recruiterMap[name].latest))
+      recruiterMap[name].latest = c.createdAt;
+    recruiterMap[name].candidates.push(c);
+  });
+  const recruiterStats = Object.values(recruiterMap).map((r: any) => ({
+    ...r,
+    avgScore: r.scores.length ? Math.round(r.scores.reduce((a: number, b: number) => a + b, 0) / r.scores.length) : 0,
+    convRate: r.uploads > 0 ? Math.round((r.hmReady / r.uploads) * 100) : 0,
+  })).sort((a: any, b: any) => b.uploads - a.uploads);
+
+  const filteredCandidates = recruiterFilter === 'all'
+    ? allCandidates
+    : allCandidates.filter((c: any) => (c.uploadedByName || c.uploadedBy || 'Unknown') === recruiterFilter);
+
+  const stuckCandidates  = filteredCandidates.filter(c => getDaysInStage(c) >= 5 && c.status !== 'rejected' && c.status !== 'hm_ready');
+  const pendingReview    = filteredCandidates.filter((c: any) => c.status === 'answers_submitted');
+  const hmReady          = filteredCandidates.filter((c: any) => c.status === 'hm_ready');
+  const highScoreEarly   = filteredCandidates.filter((c: any) => (c.aiScore||c.score||0) >= 80 && (c.status === 'cv_uploaded' || c.status === 'ai_screened'));
   const emptyJobs        = jobs.filter(j => (j.candidateCount || 0) === 0);
 
   const alerts: { type: 'red'|'amber'|'green'|'blue'; message: string; path: string; action: string }[] = [];
@@ -109,7 +137,7 @@ export default function DashboardPage() {
   // ── Pipeline counts ───────────────────────────────────────────
   const pipelineCounts = STATUSES.map(s => ({
     ...s,
-    count: allCandidates.filter(c => (c.status || 'cv_uploaded') === s.value).length,
+    count: filteredCandidates.filter((c: any) => (c.status || 'cv_uploaded') === s.value).length,
   }));
 
   const colorMap: Record<string, string> = {
@@ -205,6 +233,74 @@ export default function DashboardPage() {
           </div>
         ))}
       </div>
+
+      {/* ── Recruiter Activity Panel (Admin Only) ── */}
+      {isAdmin && !loading && (
+        <div className="bg-white rounded-2xl border border-gray-100 mb-6 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="font-bold text-gray-900 text-base">👤 Recruiter Activity</h2>
+              <p className="text-xs text-gray-400 mt-0.5">Uploads and pipeline progress per recruiter — click a row to filter pipeline below</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-500 font-medium">Filter pipeline by:</span>
+              <button onClick={() => setRecruiterFilter('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${recruiterFilter === 'all' ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-blue-300'}`}>
+                All
+              </button>
+              {recruiterStats.map((r: any) => (
+                <button key={r.name} onClick={() => setRecruiterFilter(recruiterFilter === r.name ? 'all' : r.name)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${recruiterFilter === r.name ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-blue-300'}`}>
+                  {r.name.split(' ')[0]} ({r.uploads})
+                </button>
+              ))}
+            </div>
+          </div>
+          {recruiterStats.length === 0 ? (
+            <div className="p-8 text-center text-gray-400 text-sm">No recruiter data yet</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    {['Recruiter','Uploads','Screened','HM Ready','Rejected','Avg Score','Conv %','Last Upload'].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {recruiterStats.map((r: any, i: number) => (
+                    <tr key={i} onClick={() => setRecruiterFilter(recruiterFilter === r.name ? 'all' : r.name)}
+                      className={`cursor-pointer transition-colors ${recruiterFilter === r.name ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-black">{r.name.charAt(0).toUpperCase()}</div>
+                          <div>
+                            <div className="font-semibold text-gray-900 text-sm">{r.name}</div>
+                            {i === 0 && <span className="text-xs text-amber-600">🏆 Most active</span>}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3"><span className="font-black text-gray-900 text-lg">{r.uploads}</span></td>
+                      <td className="px-4 py-3"><span className="text-sm text-blue-700 font-medium">{r.screened}</span></td>
+                      <td className="px-4 py-3"><span className={`text-sm font-bold px-2 py-0.5 rounded-full ${r.hmReady > 0 ? 'bg-emerald-100 text-emerald-700' : 'text-gray-300'}`}>{r.hmReady}</span></td>
+                      <td className="px-4 py-3"><span className={`text-sm ${r.rejected > 0 ? 'text-red-500' : 'text-gray-300'}`}>{r.rejected}</span></td>
+                      <td className="px-4 py-3"><span className={`font-black text-sm ${r.avgScore >= 80 ? 'text-emerald-600' : r.avgScore >= 60 ? 'text-blue-600' : r.avgScore > 0 ? 'text-amber-600' : 'text-gray-300'}`}>{r.avgScore > 0 ? r.avgScore : '—'}</span></td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-10 h-1.5 bg-gray-100 rounded-full"><div className={`h-1.5 rounded-full ${r.convRate>=30?'bg-emerald-500':r.convRate>=15?'bg-blue-500':'bg-amber-400'}`} style={{width:`${r.convRate}%`}}/></div>
+                          <span className="text-xs font-bold text-gray-600">{r.convRate}%</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{r.latest ? new Date(r.latest).toLocaleDateString('en-IN',{day:'2-digit',month:'short'}) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Pipeline Overview ── */}
       {!loading && (

@@ -449,6 +449,19 @@ export default function CandidatesPage() {
 
   const getStatusInfo = (status?: string) => STATUSES.find(s => s.value === (status || "cv_uploaded")) || STATUSES[0];
 
+  const isAdmin = user?.role === 'admin';
+
+  async function bulkRescreen() {
+    if (!window.confirm('Re-run AI screening on all unscored candidates (score = 0)?')) return;
+    try {
+      const r = await fetch(`${API}/candidates/bulk-rescreen`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }
+      });
+      const d = await r.json();
+      alert(`Found ${d.count} unscored candidates. Please re-upload their CVs individually or use Re-screen button on each profile.`);
+    } catch { alert('Failed'); }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 p-6">
 
@@ -469,6 +482,11 @@ export default function CandidatesPage() {
         </div>
         <div className="flex gap-3">
           <button onClick={fetchCandidates} className="border border-gray-200 bg-white text-gray-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-gray-50 text-sm">↻ Refresh</button>
+          {isAdmin && (
+            <button onClick={bulkRescreen} className="border border-amber-200 bg-amber-50 text-amber-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-amber-100 text-sm">
+              🔄 Bulk Re-screen
+            </button>
+          )}
           <button onClick={exportCSV} className="border border-gray-200 bg-white text-gray-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-gray-50 text-sm">↓ Export CSV</button>
         </div>
       </div>

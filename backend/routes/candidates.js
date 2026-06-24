@@ -745,4 +745,17 @@ router.patch('/:id/interview-date', protect, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+// ── PATCH /api/candidates/:id/fix-roletype ─────────────────────
+// Fix roleType tag for existing candidates based on their job
+router.patch('/:id/fix-roletype', protect, async (req, res) => {
+  try {
+    const candidate = await Candidate.findById(req.params.id).populate('jobId');
+    if (!candidate) return res.status(404).json({ message: 'Not found' });
+    const roleType = candidate.jobId?.roleType || req.body.roleType || 'technical';
+    candidate.roleType = roleType;
+    await candidate.save();
+    res.json({ message: 'roleType updated', roleType });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
 module.exports = router;

@@ -94,6 +94,10 @@ export default function CandidateDetailPage() {
   const [answers, setAnswers]     = useState<string[]>([]);
   const [genLoading, setGenLoading]   = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
+  const [transcriptMode, setTranscriptMode] = useState<"manual"|"transcript">("manual");
+  const [transcriptText, setTranscriptText] = useState("");
+  const [transcriptLoading, setTranscriptLoading] = useState(false);
+  const [transcriptFile, setTranscriptFile] = useState<File|null>(null);
   const [screenResult, setScreenResult]   = useState<any>(null);
   const [rescreenLoading, setRescreenLoading] = useState(false);
 
@@ -181,6 +185,51 @@ export default function CandidateDetailPage() {
       setCandidate(p => p ? {...p, interviewQuestions:qs, status:"questions_sent"} : p);
       setTab("screening");
     } finally { setGenLoading(false); }
+  }
+
+  async function uploadTranscript() {
+    if (!transcriptText.trim() && !transcriptFile) {
+      alert("Please paste a transcript or upload a file");
+      return;
+    }
+    setTranscriptLoading(true);
+    try {
+      let text = transcriptText;
+      // If file uploaded, read it as text
+      if (transcriptFile) {
+        text = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string || "");
+          reader.readAsText(transcriptFile);
+        });
+      }
+
+      // Send transcript + questions to backend for AI extraction
+      const r = await fetch(`${API}/candidates/${id}/transcript-screen`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          transcript: text,
+          questions: questions,
+          sessionType: qMode === "ai" ? "ai_generated" : "bank_questions",
+          difficulty: isTech ? difficulty : "medium",
+          meetingSource: "webex"
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.message || "Transcript processing failed"); return; }
+      setScreenResult(d);
+      setCandidate(p => p ? {
+        ...p,
+        screeningScore: d.session?.screeningScore || d.overallScore || 0,
+        screeningSessions: [...(p.screeningSessions || []), d.session],
+        combinedScore: d.session?.screeningScore || 0,
+        status: "answers_submitted"
+      } : p);
+      setTab("hm-report");
+    } catch(err) {
+      alert("Failed to process transcript. Please try again.");
+    } finally { setTranscriptLoading(false); }
   }
 
   async function submitAnswers() {
@@ -1043,24 +1092,144 @@ export default function CandidateDetailPage() {
                 <div className={`rounded-xl p-3 border text-sm font-semibold ${qMode==="ai"?"bg-blue-50 border-blue-100 text-blue-700":"bg-purple-50 border-purple-100 text-purple-700"}`}>
                   {qMode==="ai"?`🤖 AI Questions — ${DIFF[difficulty].icon} ${DIFF[difficulty].label}`:"📋 Job Bank Questions"} · {questions.length}Q
                 </div>
-                <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-sm text-amber-700">
-                  <strong>Recruiter:</strong> Ask each question. Record the candidate's answer. AI will score each response.
+                {/* Mode Toggle - Manual vs Transcript */}
+                <div className="bg-gray-100 rounded-2xl p-1.5 flex gap-1">
+                  <button onClick={() => setTranscriptMode("manual")}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${transcriptMode==="manual" ? "bg-white text-blue-600 shadow-sm" : "text-gray-500"}`}>
+                    ✏️ Manual Entry
+                  </button>
+                  <button onClick={() => setTranscriptMode("transcript")}
+                    className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${transcriptMode==="transcript" ? "bg-white text-purple-600 shadow-sm" : "text-gray-500"}`}>
+                    🎙️ Upload Transcript
+                  </button>
                 </div>
-                {questions.map((q,i)=>(
-                  <div key={i} className="bg-white rounded-xl p-5 border border-gray-100">
-                    <div className="flex gap-3 mb-3">
-                      <span className="w-7 h-7 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold shrink-0">{i+1}</span>
-                      <p className="text-sm font-medium text-gray-800 leading-relaxed">{q}</p>
+
+                {transcriptMode === "manual" ? (
+                  <>
+                    <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-sm text-amber-700">
+                      <strong>Recruiter:</strong> Ask each question. Record the candidate's answer. AI will score each response.
                     </div>
-                    <textarea value={answers[i]||""} onChange={e=>{const a=[...answers];a[i]=e.target.value;setAnswers(a);}}
-                      rows={3} placeholder="Record candidate's answer here..."
-                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"/>
-                  </div>
-                ))}
-                <button onClick={submitAnswers} disabled={submitLoading||answers.filter(a=>a.trim()).length<questions.length}
-                  className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-60">
-                  {submitLoading?"⏳ AI scoring...":"🚀 Submit Answers for AI Scoring"}
-                </button>
+                    {questions.map((q,i)=>(
+                      <div key={i} className="bg-white rounded-xl p-5 border border-gray-100">
+                        <div className="flex gap-3 mb-3">
+                          <span className="w-7 h-7 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold shrink-0">{i+1}</span>
+                          <p className="text-sm font-medium text-gray-800 leading-relaxed">{q}</p>
+                        </div>
+                        <textarea value={answers[i]||""} onChange={e=>{const a=[...answers];a[i]=e.target.value;setAnswers(a);}}
+                          rows={3} placeholder="Record candidate's answer here..."
+                          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                      </div>
+                    ))}
+                    <button onClick={submitAnswers} disabled={submitLoading||answers.filter(a=>a.trim()).length<questions.length}
+                      className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-60">
+                      {submitLoading?"⏳ AI scoring...":"🚀 Submit Answers for AI Scoring"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {/* Transcript Upload Mode */}
+                    <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-2xl">🎙️</span>
+                        <div>
+                          <p className="text-sm font-bold text-purple-900">Webex / Teams / Zoom Transcript</p>
+                          <p className="text-xs text-purple-600">AI will extract answers from the meeting transcript and match them to the questions above</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Questions summary */}
+                    <div className="bg-white rounded-xl border border-gray-100 p-4">
+                      <p className="text-xs font-bold text-gray-500 uppercase mb-2">Questions AI will look for in transcript:</p>
+                      {questions.map((q,i) => (
+                        <div key={i} className="flex gap-2 mb-1.5 items-start">
+                          <span className="w-5 h-5 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">{i+1}</span>
+                          <p className="text-xs text-gray-600">{q}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Upload Options */}
+                    <div className="space-y-3">
+                      {/* File Upload */}
+                      <div className="bg-white rounded-xl border-2 border-dashed border-purple-200 p-4 text-center hover:border-purple-400 transition-all">
+                        <input
+                          type="file"
+                          accept=".txt,.vtt,.srt,.doc,.docx"
+                          id="transcript-file"
+                          className="hidden"
+                          onChange={e => {
+                            const f = e.target.files?.[0];
+                            if (f) { setTranscriptFile(f); setTranscriptText(""); }
+                          }}
+                        />
+                        <label htmlFor="transcript-file" className="cursor-pointer">
+                          <div className="text-3xl mb-2">📄</div>
+                          <p className="text-sm font-semibold text-gray-700">
+                            {transcriptFile ? `✅ ${transcriptFile.name}` : "Upload transcript file"}
+                          </p>
+                          <p className="text-xs text-gray-400 mt-1">Supports .txt, .vtt, .srt, .docx</p>
+                          <div className="mt-2 bg-purple-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold inline-block hover:bg-purple-700">
+                            Choose File
+                          </div>
+                        </label>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 h-px bg-gray-200"/>
+                        <span className="text-xs text-gray-400 font-medium">OR</span>
+                        <div className="flex-1 h-px bg-gray-200"/>
+                      </div>
+
+                      {/* Paste Text */}
+                      <div>
+                        <label className="block text-xs font-bold text-gray-600 uppercase mb-2">Paste transcript text directly</label>
+                        <textarea
+                          value={transcriptText}
+                          onChange={e => { setTranscriptText(e.target.value); setTranscriptFile(null); }}
+                          rows={8}
+                          placeholder={`Paste your Webex/Teams/Zoom meeting transcript here...
+
+Example format:
+[00:01:23] Interviewer: Can you explain React hooks?
+[00:01:45] Candidate: Sure, React hooks are functions that let you use state and lifecycle features...
+[00:03:12] Interviewer: How would you handle performance issues?
+[00:03:30] Candidate: I would start by profiling the app using React DevTools...`}
+                          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {/* How it works */}
+                    <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                      <p className="text-xs font-bold text-gray-600 mb-2">🤖 How AI processes the transcript:</p>
+                      <div className="space-y-1.5">
+                        {[
+                          "Reads the full meeting transcript",
+                          "Identifies candidate's responses to each question",
+                          "Scores each answer based on accuracy, depth and relevance",
+                          "Generates a screening score just like manual entry"
+                        ].map((step, i) => (
+                          <div key={i} className="flex gap-2 items-center">
+                            <span className="w-4 h-4 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-xs font-bold shrink-0">{i+1}</span>
+                            <p className="text-xs text-gray-600">{step}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={uploadTranscript}
+                      disabled={transcriptLoading || (!transcriptText.trim() && !transcriptFile)}
+                      className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 disabled:opacity-60 flex items-center justify-center gap-2">
+                      {transcriptLoading ? (
+                        <><span className="animate-spin">⏳</span> AI is reading transcript...</>
+                      ) : (
+                        <><span>🎙️</span> Process Transcript & Score</>
+                      )}
+                    </button>
+                  </>
+                )}
               </>
             )}
           </div>

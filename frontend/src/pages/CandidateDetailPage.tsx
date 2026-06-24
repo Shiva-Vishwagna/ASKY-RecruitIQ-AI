@@ -551,6 +551,7 @@ export default function CandidateDetailPage() {
             { key:"overview",    label:"Overview"                                               },
             { key:"score",       label:"Score Breakdown"                                        },
             { key:"ai-insights", label:"AI Insights" + (!hasInsights?" ⚠️":"")                 },
+            { key:"tech-acumen", label:"🔬 Tech Acumen"                                        },
             { key:"generate",    label:"Generate Questions"                                     },
             { key:"screening",   label:`Screening${questions.length>0?` (${questions.length}Q)`:""}`},
             { key:"sessions",    label:`Sessions${sessions.length>0?` (${sessions.length})`:""}`},
@@ -786,6 +787,150 @@ export default function CandidateDetailPage() {
         )}
 
         {/* GENERATE QUESTIONS */}
+        {tab==="tech-acumen" && (
+          <div className="space-y-4">
+
+            {/* Header */}
+            <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-2xl p-5 text-white">
+              <h2 className="text-lg font-bold mb-1">🔬 Technology Acumen</h2>
+              <p className="text-blue-200 text-sm">Skill depth analysis extracted from CV — no extra AI tokens used</p>
+            </div>
+
+            {/* Skill Scores - from AI extraction */}
+            {(candidate as any).skillScores?.length > 0 && (
+              <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                <h3 className="font-bold text-gray-900 mb-4">📊 Skill Proficiency Scores</h3>
+                <div className="space-y-3">
+                  {(candidate as any).skillScores.map((s: any, i: number) => (
+                    <div key={i}>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-sm font-semibold text-gray-700">{s.skill}</span>
+                        <span className={`text-sm font-bold ${s.score >= 80 ? 'text-emerald-600' : s.score >= 60 ? 'text-blue-600' : s.score >= 40 ? 'text-amber-600' : 'text-red-500'}`}>
+                          {s.score}/100
+                        </span>
+                      </div>
+                      <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-2.5 rounded-full transition-all ${s.score >= 80 ? 'bg-emerald-500' : s.score >= 60 ? 'bg-blue-500' : s.score >= 40 ? 'bg-amber-500' : 'bg-red-400'}`}
+                          style={{ width: `${s.score}%` }}
+                        />
+                      </div>
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        {s.score >= 80 ? '⭐ Expert' : s.score >= 60 ? '✅ Proficient' : s.score >= 40 ? '🔄 Intermediate' : '🌱 Beginner'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tech Stack Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+              {/* Frameworks */}
+              {(candidate as any).frameworks?.length > 0 && (
+                <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                  <h3 className="font-bold text-gray-900 mb-3">🧩 Frameworks & Libraries</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {(candidate as any).frameworks.map((f: string, i: number) => (
+                      <span key={i} className="bg-purple-50 text-purple-700 border border-purple-200 text-xs font-semibold px-3 py-1.5 rounded-full">
+                        {f}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Databases */}
+              {(candidate as any).databases?.length > 0 && (
+                <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                  <h3 className="font-bold text-gray-900 mb-3">🗄️ Databases</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {(candidate as any).databases.map((d: string, i: number) => (
+                      <span key={i} className="bg-blue-50 text-blue-700 border border-blue-200 text-xs font-semibold px-3 py-1.5 rounded-full">
+                        {d}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Tools */}
+              {(candidate as any).tools?.length > 0 && (
+                <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                  <h3 className="font-bold text-gray-900 mb-3">🛠️ Tools & Platforms</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {(candidate as any).tools.map((t: string, i: number) => (
+                      <span key={i} className="bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold px-3 py-1.5 rounded-full">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Project Domains */}
+              {(candidate as any).projectDomains?.length > 0 && (
+                <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                  <h3 className="font-bold text-gray-900 mb-3">🏗️ Project Domains</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {(candidate as any).projectDomains.map((d: string, i: number) => (
+                      <span key={i} className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold px-3 py-1.5 rounded-full">
+                        {d}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Technical Experience Summary */}
+            {candidate.technicalExperience && (
+              <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                <h3 className="font-bold text-gray-900 mb-3">💼 Technical Background</h3>
+                <p className="text-sm text-gray-600 leading-relaxed">{candidate.technicalExperience}</p>
+              </div>
+            )}
+
+            {/* Top Skills with level indicators */}
+            {(candidate.topSkills?.length || 0) > 0 && (
+              <div className="bg-white rounded-2xl p-5 border border-gray-100">
+                <h3 className="font-bold text-gray-900 mb-3">⭐ Core Skills</h3>
+                <div className="flex flex-wrap gap-2">
+                  {candidate.topSkills!.map((s, i) => (
+                    <span key={i} className="bg-indigo-50 text-indigo-700 border border-indigo-200 text-sm font-semibold px-3 py-1.5 rounded-full">
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!(candidate as any).skillScores?.length &&
+             !(candidate as any).frameworks?.length &&
+             !(candidate as any).databases?.length &&
+             !(candidate as any).tools?.length && (
+              <div className="bg-gray-50 rounded-2xl p-10 text-center border border-gray-100">
+                <div className="text-4xl mb-3">🔬</div>
+                <p className="font-bold text-gray-600">No tech data yet</p>
+                <p className="text-sm text-gray-400 mt-1">Re-screen the CV to extract technology details</p>
+                <button onClick={rescreen} disabled={rescreenLoading}
+                  className="mt-4 bg-blue-600 text-white px-5 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 disabled:opacity-60">
+                  {rescreenLoading ? "⏳ Running..." : "🔄 Extract Tech Data"}
+                </button>
+              </div>
+            )}
+
+            {/* Token info note */}
+            <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 flex items-center gap-2">
+              <span className="text-green-600 text-lg">✅</span>
+              <p className="text-xs text-gray-500">This data was extracted during CV upload — <strong>no additional AI tokens consumed</strong> when viewing this tab.</p>
+            </div>
+
+          </div>
+        )}
+
         {tab==="generate" && (
           <div className="bg-white rounded-2xl p-6 border border-gray-100">
             <h2 className="font-bold text-gray-900 text-lg mb-4">Generate Interview Questions</h2>

@@ -1323,7 +1323,8 @@ Example format:
           <div className="space-y-4">
             {/* Add note */}
             <div className="bg-white rounded-2xl p-5 border border-gray-100">
-              <h3 className="font-bold text-gray-900 mb-3">📝 Add Note</h3>
+              <h3 className="font-bold text-gray-900 mb-1">📝 Recruiter Notes</h3>
+              <p className="text-xs text-gray-400 mb-3">Record call observations, interview feedback, follow-ups — visible to your team only</p>
               <textarea value={newNote} onChange={e => setNewNote(e.target.value)}
                 rows={3} placeholder="Type your note, observation or follow-up here..."
                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3"/>
@@ -1368,7 +1369,8 @@ Example format:
 
             {/* Interview scheduling */}
             <div className="bg-blue-50 rounded-2xl p-5 border border-blue-100">
-              <h3 className="font-bold text-blue-900 mb-3">📅 Schedule Interview</h3>
+              <h3 className="font-bold text-blue-900 mb-1">📅 Schedule Interview</h3>
+              <p className="text-xs text-blue-600 mb-3">Set a proposed interview date — this will appear on the candidate's Timeline tab</p>
               <div className="grid grid-cols-2 gap-3 mb-3">
                 <div>
                   <label className="block text-xs font-bold text-blue-700 mb-1">Interview Date</label>
@@ -1378,7 +1380,7 @@ Example format:
                 <div>
                   <label className="block text-xs font-bold text-blue-700 mb-1">Notes (optional)</label>
                   <input type="text" value={interviewNotes} onChange={e => setInterviewNotes(e.target.value)}
-                    placeholder="e.g. Video call, Panel interview..."
+                    placeholder="e.g. Video call with HM, Panel interview, Technical round..."
                     className="w-full border border-blue-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"/>
                 </div>
               </div>

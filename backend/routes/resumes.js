@@ -125,11 +125,26 @@ router.post('/upload', protect, (req, res) => {
             continue;
           }
 
+          // ── Detect domain mismatch ────────────────────────
+          // Technical candidate applying for Non-Tech role or vice versa
+          const candidateDomain = (ai.domain || '').toLowerCase();
+          const candidateSkills = (ai.topSkills || []).join(' ').toLowerCase();
+          const isTechCandidate = candidateSkills.match(/java|python|react|node|sql|aws|cloud|developer|engineer|software|coding|programming|backend|frontend|devops|api/i) !== null;
+          const isNonTechRole = roleType === 'non_technical';
+          const isdomainMismatch = !!(ai.riskFlags?.domainMismatch) || (isNonTechRole && isTechCandidate);
+
+          if (isdomainMismatch && isNonTechRole && isTechCandidate) {
+            console.log(`[upload] ⚠️ DOMAIN MISMATCH: Technical candidate "${ai.name}" for Non-Technical role "${jobContext.title || ''}"`);
+            // Force domainMismatch flag
+            if (!ai.riskFlags) ai.riskFlags = {};
+            ai.riskFlags.domainMismatch = true;
+          }
+
           // ── Calculate scores ──────────────────────────────
-          const cvScore = calculateCVScore(ai.cvScoreBreakdown, roleType);
+          const cvScore = calculateCVScore(ai.cvScoreBreakdown, roleType, isdomainMismatch);
           const tier    = determineTier(cvScore);
 
-          console.log(`[upload] ${ai.name} | CV: ${cvScore} | Tier: ${tier} | Role: ${roleType}`);
+          console.log(`[upload] ${ai.name} | CV: ${cvScore} | Tier: ${tier} | Role: ${roleType} | Mismatch: ${isdomainMismatch}`);
 
           // ── Save candidate ────────────────────────────────
           const candidate = await Candidate.create({

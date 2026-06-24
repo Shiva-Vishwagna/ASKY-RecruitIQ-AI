@@ -17,7 +17,15 @@ const {
 // ─────────────────────────────────────────────────────────────────
 router.get('/', protect, async (req, res) => {
   try {
-    const candidates = await Candidate.find().sort({ createdAt: -1 });
+    const isAdmin = req.user.role === 'admin';
+    // Admins see all candidates; recruiters see only their own uploads
+    const filter = isAdmin ? {} : {
+      $or: [
+        { uploadedBy: req.user._id },
+        { uploadedByName: req.user.name }
+      ]
+    };
+    const candidates = await Candidate.find(filter).sort({ createdAt: -1 });
     res.json({ candidates });
   } catch (err) {
     console.error('[GET /candidates]', err.message);

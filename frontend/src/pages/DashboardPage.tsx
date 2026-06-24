@@ -24,6 +24,17 @@ export default function DashboardPage() {
   const [jobs, setJobs]                   = useState<any[]>([]);
   const [loading, setLoading]             = useState(true);
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const [search, setSearch] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); setShowSearch(s => !s); }
+      if (e.key === 'Escape') setShowSearch(false);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -67,6 +78,14 @@ export default function DashboardPage() {
   }, []);
 
   // ── Smart Alerts ─────────────────────────────────────────────
+  const searchResults = search.trim().length > 1
+    ? allCandidates.filter(c =>
+        c.name?.toLowerCase().includes(search.toLowerCase()) ||
+        c.email?.toLowerCase().includes(search.toLowerCase()) ||
+        (c.appliedFor||c.jobTitle||'').toLowerCase().includes(search.toLowerCase())
+      ).slice(0, 8)
+    : [];
+
   const stuckCandidates  = allCandidates.filter(c => getDaysInStage(c) >= 5 && c.status !== 'rejected' && c.status !== 'hm_ready');
   const pendingReview    = allCandidates.filter(c => c.status === 'answers_submitted');
   const hmReady          = allCandidates.filter(c => c.status === 'hm_ready');
@@ -115,7 +134,14 @@ export default function DashboardPage() {
       <div className="mb-6 flex items-start justify-between">
         <div>
           <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-3xl font-bold text-gray-900">Welcome back, {user.name?.split(' ')[0]} 👋</h1>
+            {user.role !== 'admin' && (
+              <span className="bg-blue-100 text-blue-700 text-xs font-bold px-3 py-1 rounded-full border border-blue-200">
+                👤 Recruiter View — Your Candidates Only
+              </span>
+            )}
+          </div>
             {user.role !== 'admin' && (
               <span className="bg-blue-100 text-blue-700 text-xs font-bold px-3 py-1 rounded-full border border-blue-200">
                 👤 Recruiter View — Your Candidates Only
@@ -124,10 +150,16 @@ export default function DashboardPage() {
           </div>
           <p className="text-gray-400 mt-1 text-sm">{new Date().toLocaleDateString('en-IN', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}</p>
         </div>
-        <button onClick={() => navigate('/pipeline')}
-          className="bg-blue-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-all">
-          🎯 Pipeline View
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowSearch(s => !s)}
+            className="bg-gray-100 text-gray-600 px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-gray-200 transition-all flex items-center gap-2">
+            🔍 Search <span className="text-xs text-gray-400 bg-white px-1.5 py-0.5 rounded-md border border-gray-200">Ctrl+K</span>
+          </button>
+          <button onClick={() => navigate('/pipeline')}
+            className="bg-blue-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-all">
+            🎯 Pipeline View
+          </button>
+        </div>
       </div>
 
       {/* ── Smart Alerts ── */}

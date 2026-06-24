@@ -56,9 +56,8 @@ const REC: Record<string,string> = {
   "Reject":     "bg-red-100 text-red-700 border-red-300",
 };
 const DIFF = {
-  easy:  { icon:"🟢", label:"Easy",   color:"bg-emerald-600 text-white", pale:"bg-emerald-50 text-emerald-800 border border-emerald-200", desc:"0–2 yrs · Core concepts"  },
-  medium:{ icon:"🟡", label:"Medium", color:"bg-amber-500 text-white",   pale:"bg-amber-50 text-amber-800 border border-amber-200",       desc:"3–5 yrs · Real scenarios" },
-  hard:  { icon:"🔴", label:"Hard",   color:"bg-red-600 text-white",     pale:"bg-red-50 text-red-800 border border-red-200",             desc:"6+ yrs · System design"   },
+  medium:{ icon:"🟡", label:"Medium", color:"bg-amber-500 text-white",   pale:"bg-amber-50 text-amber-800 border border-amber-200",       desc:"7 questions · Real scenarios" },
+  hard:  { icon:"🔴", label:"Hard",   color:"bg-red-600 text-white",     pale:"bg-red-50 text-red-800 border border-red-200",             desc:"5 questions · System design"   },
 };
 
 function clr(n: number) { return n>=80?"text-emerald-600":n>=60?"text-blue-600":n>=40?"text-amber-600":"text-red-600"; }
@@ -89,7 +88,7 @@ export default function CandidateDetailPage() {
 
   // Question / screening state
   const [qMode, setQMode]       = useState<"ai"|"bank">("ai");
-  const [difficulty, setDifficulty] = useState<"easy"|"medium"|"hard">("medium");
+  const [difficulty, setDifficulty] = useState<"medium"|"hard">("medium");
   const [bankDiff, setBankDiff] = useState<"all"|"easy"|"medium"|"hard">("all");
   const [questions, setQuestions] = useState<string[]>([]);
   const [answers, setAnswers]     = useState<string[]>([]);
@@ -141,6 +140,7 @@ export default function CandidateDetailPage() {
   async function generateAI() {
     if (!candidate) return;
     setGenLoading(true);
+    const questionCount = isTech ? (difficulty === "hard" ? 5 : 7) : 7;
     try {
       const r = await fetch(`${API}/candidates/${id}/questions`, {
         method:"POST",
@@ -148,8 +148,11 @@ export default function CandidateDetailPage() {
         body: JSON.stringify({
           jobTitle:  candidate.appliedFor || candidate.jobTitle,
           skills:    candidate.topSkills,
-          difficulty,
+          difficulty: isTech ? difficulty : "medium",
           roleType:  roleType,
+          count:     questionCount,
+          mode:      "ai",
+          theoryFocus: true,
         }),
       });
       const d = await r.json();
@@ -168,7 +171,7 @@ export default function CandidateDetailPage() {
     if (!jobId) { alert("No job linked to this candidate"); return; }
     setGenLoading(true);
     try {
-      const url = `${API}/jobs/${jobId}/question-bank/random${bankDiff!=="all"?`?difficulty=${bankDiff}`:""}`;
+      const url = `${API}/jobs/${jobId}/question-bank/random?difficulty=medium`;
       const r   = await fetch(url, { headers:{ Authorization:`Bearer ${token}` } });
       const d   = await r.json();
       if (!r.ok) { alert(d.message || "No questions in bank"); return; }
@@ -813,25 +816,42 @@ export default function CandidateDetailPage() {
               <div className="space-y-4">
                 <div className={`rounded-xl p-4 border ${isTech?"bg-blue-50 border-blue-100":"bg-amber-50 border-amber-100"}`}>
                   <p className={`text-sm font-bold mb-1 ${isTech?"text-blue-900":"text-amber-900"}`}>
-                    AI generates 8 {isTech?"technical":"role-specific"} questions
+                    {isTech
+                      ? `AI generates ${difficulty==="hard"?"5":"7"} theory-based technical questions`
+                      : "AI generates 7 role-specific theory questions"}
                   </p>
                   <p className={`text-xs ${isTech?"text-blue-600":"text-amber-600"}`}>
-                    {isTech?`Skills: ${(candidate.topSkills||[]).slice(0,3).join(", ")||"General"}`:`Domain: ${candidate.domain||candidate.appliedFor||"General"}`}
+                    {isTech
+                      ? `Skills: ${(candidate.topSkills||[]).slice(0,3).join(", ")||"General"}`
+                      : `Domain: ${candidate.domain||candidate.appliedFor||"General"}`}
                   </p>
                 </div>
+
+                {/* Difficulty — IT roles: Medium + Hard | Non-IT: Medium only */}
                 <div>
                   <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Difficulty Level</p>
-                  <div className="grid grid-cols-3 gap-3">
-                    {(Object.entries(DIFF) as [keyof typeof DIFF, typeof DIFF["easy"]][]).map(([k,d])=>(
-                      <button key={k} onClick={()=>setDifficulty(k)}
-                        className={`p-4 rounded-xl text-left transition-all ${difficulty===k?d.color:d.pale}`}>
-                        <div className="text-lg mb-1">{d.icon}</div>
-                        <div className="font-bold text-sm">{d.label}</div>
-                        <div className="text-xs opacity-70 mt-0.5">{d.desc}</div>
-                      </button>
-                    ))}
-                  </div>
+                  {isTech ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      {(["medium","hard"] as const).map(k=>(
+                        <button key={k} onClick={()=>setDifficulty(k)}
+                          className={`p-4 rounded-xl text-left transition-all ${difficulty===k?DIFF[k].color:DIFF[k].pale}`}>
+                          <div className="text-lg mb-1">{DIFF[k].icon}</div>
+                          <div className="font-bold text-sm">{DIFF[k].label}</div>
+                          <div className="text-xs opacity-70 mt-0.5">{DIFF[k].desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3">
+                      <div className={`p-4 rounded-xl text-left ${DIFF["medium"].color}`}>
+                        <div className="text-lg mb-1">{DIFF["medium"].icon}</div>
+                        <div className="font-bold text-sm">Medium</div>
+                        <div className="text-xs opacity-70 mt-0.5">7 questions · Role-specific scenarios</div>
+                      </div>
+                    </div>
+                  )}
                 </div>
+
                 <button onClick={generateAI} disabled={genLoading}
                   className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 disabled:opacity-60">
                   {genLoading?"⏳ Generating...":"✨ Generate Questions"}
@@ -839,27 +859,19 @@ export default function CandidateDetailPage() {
               </div>
             )}
 
-            {/* Bank mode */}
+            {/* Bank mode — Medium only */}
             {qMode==="bank" && (
               <div className="space-y-4">
                 <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
-                  <p className="text-sm font-bold text-purple-900 mb-1">📋 8 random questions from the job's question bank</p>
-                  <p className="text-xs text-purple-600">Shuffled and picked randomly each time</p>
+                  <p className="text-sm font-bold text-purple-900 mb-1">📋 Medium difficulty questions from the job bank</p>
+                  <p className="text-xs text-purple-600">Questions shuffled and picked randomly from the bank</p>
                 </div>
-                <div>
-                  <p className="text-xs font-bold text-gray-600 uppercase tracking-wide mb-2">Filter by difficulty (optional)</p>
-                  <div className="flex gap-2">
-                    {(["all","easy","medium","hard"] as const).map(d=>(
-                      <button key={d} onClick={()=>setBankDiff(d)}
-                        className={`flex-1 py-2 rounded-xl text-xs font-bold border capitalize transition-all ${bankDiff===d?"bg-purple-600 text-white border-purple-600":"border-gray-200 text-gray-600 hover:border-purple-300"}`}>
-                        {d==="easy"?"🟢 Easy":d==="medium"?"🟡 Med":d==="hard"?"🔴 Hard":"All"}
-                      </button>
-                    ))}
-                  </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                  <p className="text-xs text-amber-700 font-semibold">🟡 Medium difficulty only — suitable for all candidates</p>
                 </div>
                 <button onClick={loadBank} disabled={genLoading}
                   className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 disabled:opacity-60">
-                  {genLoading?"⏳ Loading...":"🎲 Pick 8 Random Questions"}
+                  {genLoading?"⏳ Loading...":"🎲 Pick Questions from Bank"}
                 </button>
               </div>
             )}

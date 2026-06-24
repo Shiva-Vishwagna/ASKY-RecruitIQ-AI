@@ -7,6 +7,7 @@ interface Job {
   status: string; description: string; requirements: string[];
   level?: string; requiredSkills?: string[]; minAiScore?: number; createdAt: string;
   roleType?: "technical"|"non_technical";
+  closeReason?: string;
   questionBank?: { text: string; difficulty: "easy"|"medium"|"hard"; category: string }[];
 }
 interface Candidate {
@@ -754,7 +755,7 @@ function CandidatePanel({ candidate, job, API, token, onStatusChange, onDelete, 
         body: JSON.stringify({ closeReason: reason })
       });
       const d = await r.json();
-      if (r.ok) setJob({ ...job, status: 'closed', closeReason: reason });
+      if (r.ok && job) setJob({ ...job, status: 'closed', closeReason: reason } as Job);
     } catch { alert('Failed to close job'); }
   }
 

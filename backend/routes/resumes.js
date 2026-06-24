@@ -57,6 +57,13 @@ router.post('/upload', protect, (req, res) => {
     try {
       const files = req.files || [];
       if (!files.length) return res.status(400).json({ message: 'No files uploaded.' });
+      const isAdmin = req.user.role === 'admin';
+      const maxFiles = isAdmin ? 50 : 10;
+      if (files.length > maxFiles) {
+        return res.status(400).json({
+          message: `Maximum ${maxFiles} CVs allowed per upload${!isAdmin ? '. Contact your admin if you need to upload more.' : '.'}`
+        });
+      }
 
       // ── Load job context (critical for scoring) ───────────
       let job = null;

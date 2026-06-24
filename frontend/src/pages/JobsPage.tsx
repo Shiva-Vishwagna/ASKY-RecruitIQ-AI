@@ -51,6 +51,28 @@ export default function JobsPage() {
   const user  = JSON.parse(localStorage.getItem("user") || "{}");
   const isAdmin = user?.role === "admin";
 
+  async function loadTemplates() {
+    try {
+      const r = await fetch(`${API}/jobs/templates/list`, { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      setTemplates(d.templates || []);
+    } catch {}
+  }
+
+  async function createFromTemplate(tpl: any) {
+    const title = prompt(`Job title for new posting:`, tpl.title + ' ' + new Date().getFullYear());
+    if (!title) return;
+    try {
+      const r = await fetch(`${API}/jobs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ ...tpl, title, _id: undefined, status: 'open', isTemplate: false })
+      });
+      const d = await r.json();
+      if (d.job) { setJobs(prev => [d.job, ...prev]); setShowTemplates(false); }
+    } catch {}
+  }
+
   async function deleteJob(jobId: string, jobTitle: string) {
     if (!window.confirm(`Delete job "${jobTitle}"? This cannot be undone.`)) return;
     try {
@@ -226,7 +248,33 @@ export default function JobsPage() {
                       onClick={() => navigate(`/jobs/${job._id}`)}>
                       {job.title}
                     </h3>
-                    {isAdmin && (
+                    {isAdmin && (<>
+          <button onClick={() => { loadTemplates(); setShowTemplates(true); }}
+            className="bg-gray-100 text-gray-700 px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-gray-200 transition-all flex items-center gap-2">
+            📋 Templates
+          </button>
+          {showTemplates && (
+            <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setShowTemplates(false)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+                <h3 className="font-bold text-gray-900 text-lg mb-4">📋 Job Templates</h3>
+                {templates.length === 0 ? (
+                  <p className="text-gray-400 text-sm text-center py-6">No templates yet. Save a job as template from the job detail page.</p>
+                ) : (
+                  <div className="space-y-2 max-h-80 overflow-y-auto">
+                    {templates.map((t: any) => (
+                      <button key={t._id} onClick={() => createFromTemplate(t)}
+                        className="w-full text-left p-4 bg-gray-50 hover:bg-blue-50 rounded-xl border border-gray-100 hover:border-blue-200 transition-all">
+                        <div className="font-semibold text-gray-900 text-sm">{t.title}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">{t.department} · {t.level} · {t.roleType === 'non_technical' ? 'Non-Tech' : 'Technical'}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button onClick={() => setShowTemplates(false)} className="mt-4 w-full bg-gray-100 text-gray-600 py-2 rounded-xl text-sm font-semibold hover:bg-gray-200">Close</button>
+              </div>
+            </div>
+          )}
+        </>
                       <>
                         <button onClick={e => { e.stopPropagation(); setEditingTitleId(job._id); setEditingTitleValue(job.title); }}
                           title="Edit title"

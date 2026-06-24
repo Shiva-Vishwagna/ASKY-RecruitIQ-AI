@@ -182,20 +182,38 @@ function parseQuestionsFromText(text) {
 // ── GET random questions from bank ───────────────────────────
 router.get('/:id/question-bank/random', protect, async (req, res) => {
   try {
-    const { difficulty } = req.query;
+    const { difficulty = 'medium' } = req.query;
     const job = await Job.findById(req.params.id);
     if (!job) return res.status(404).json({ message: 'Job not found' });
 
     let bank = job.questionBank || [];
-    if (difficulty && difficulty !== 'all') {
-      const filtered = bank.filter(q => q.difficulty === difficulty);
-      bank = filtered.length >= 4 ? filtered : bank;
-    }
-    if (bank.length === 0) return res.status(404).json({ message: 'No questions in bank for this job' });
 
-    const shuffled = [...bank].sort(() => Math.random() - 0.5);
-    const picked   = shuffled.slice(0, 8);
-    res.json({ questions: picked.map(q => q.text), full: picked });
+    // Always filter to medium difficulty only
+    const mediumBank = bank.filter(q => q.difficulty === 'medium');
+    // Fall back to all questions if no medium ones exist yet
+    const pool = mediumBank.length >= 3 ? mediumBank : bank;
+
+    if (pool.length === 0) return res.status(404).json({ message: 'No questions in bank for this job. Please add questions first.' });
+
+    // Fisher-Yates proper shuffle — better randomness than sort()
+    const arr = [...pool];
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+
+    // Pick 7 questions (or all if less than 7)
+    const count = Math.min(7, arr.length);
+    const picked = arr.slice(0, count);
+
+    console.log(`[question-bank/random] Job: ${job.title} | Pool: ${pool.length} | Picked: ${count} medium questions`);
+
+    res.json({
+      questions: picked.map(q => q.text),
+      full: picked,
+      count,
+      totalInBank: pool.length
+    });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 

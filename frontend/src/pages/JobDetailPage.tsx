@@ -18,6 +18,20 @@ interface Candidate {
   primarySkillMatch?: boolean; jobFitScore?: number;
   interviewQuestions?: string[];
   screeningAnswers?: { question: string; aiScore?: number; aiFeedback?: string }[];
+  riskFlags?: {
+    domainMismatch?: boolean;
+    frequentJobChanges?: boolean;
+    missingMandatorySkills?: string[];
+    noticePeriodRisk?: string;
+  };
+  recommendation?: string;
+  summary?: string;
+  strengths?: string[];
+  gaps?: string[];
+  cvScoreBreakdown?: { skillsMatchScore?: number; stabilityScore?: number };
+  combinedScore?: number;
+  screeningSessions?: any[];
+  jobId?: string;
 }
 
 const STAGES = [

@@ -373,7 +373,7 @@ router.post('/:id/answers', protect, async (req, res) => {
       question: questions[i] || (typeof ans === 'object' ? ans.question : ''),
       userAnswer: typeof ans === 'object' ? ans.answer : ans,
       aiScore: screeningResults?.scores?.[i] || 0,
-      aiFeedback: screeningResults?.feedback?.[i] || ''
+      aiFeedback: (screeningResults?.feedback?.[i] || '').substring(0, 900)
     }));
 
     const session = {
@@ -645,8 +645,20 @@ Return ONLY valid JSON, no markdown:
       console.error('[transcript-screen AI error]', aiErr.message);
     }
 
+    // Retry once if all providers busy
     if (!scoringResult) {
-      return res.status(503).json({ message: 'AI scoring failed — all providers busy. Please try again in 1 minute.' });
+      console.log('[transcript-screen] All providers busy — waiting 15s and retrying...');
+      await new Promise(r => setTimeout(r, 15000));
+      try {
+        const retry = await callWithFallback([{ role: 'user', content: prompt }], 2500);
+        const m = retry.match(/\{[\s\S]*\}/);
+        if (m) scoringResult = JSON.parse(m[0]);
+      } catch (e2) {
+        console.error('[transcript-screen] Retry also failed:', e2.message);
+      }
+    }
+    if (!scoringResult) {
+      return res.status(503).json({ message: 'AI providers are at capacity right now. Please wait 2 minutes and try again.' });
     }
 
     // ── Build session ─────────────────────────────────────────────
@@ -669,9 +681,9 @@ Return ONLY valid JSON, no markdown:
         ) || answersData[i];
         return {
           question: q,
-          userAnswer: match?.extractedAnswer || 'Not found in transcript',
+          userAnswer: (match?.extractedAnswer || 'Not found in transcript').substring(0, 1000),
           aiScore:   (match?.score >= 0) ? match.score : 0,
-          aiFeedback: match?.feedback || ''
+          aiFeedback: (match?.feedback || '').substring(0, 900)
         };
       }),
       screeningScore: overallScore,

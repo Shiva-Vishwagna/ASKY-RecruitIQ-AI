@@ -841,4 +841,28 @@ router.patch('/:id/fix-roletype', protect, async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+
+// ── POST /api/candidates/fix-scores ────────────────────────────
+// One-time migration: recompute screeningScore + combinedScore for
+// all candidates whose combinedScore equals their aiScore (stale).
+router.post('/fix-scores', protect, async (req, res) => {
+  try {
+    const candidates = await Candidate.find({ screeningSessions: { $exists: true, $not: { $size: 0 } } });
+    let fixed = 0;
+    for (const c of candidates) {
+      const scored = (c.screeningSessions || []).filter(s => s.screeningScore > 0);
+      if (scored.length === 0) continue;
+      const avgScreen = Math.round(scored.reduce((s, x) => s + x.screeningScore, 0) / scored.length);
+      const newCombined = Math.round((c.aiScore || 0) * 0.6 + avgScreen * 0.4);
+      if (c.screeningScore !== avgScreen || c.combinedScore !== newCombined) {
+        c.screeningScore = avgScreen;
+        c.combinedScore  = newCombined;
+        await c.save();
+        fixed++;
+      }
+    }
+    res.json({ message: `Fixed ${fixed} of ${candidates.length} candidates`, fixed, total: candidates.length });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
 module.exports = router;

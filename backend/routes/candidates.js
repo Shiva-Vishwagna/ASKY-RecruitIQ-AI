@@ -519,92 +519,141 @@ router.post('/:id/hm-report', protect, async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────
 // POST /api/candidates/:id/transcript-screen
-// Process Webex/Teams/Zoom transcript and score answers
 // ─────────────────────────────────────────────────────────────────
 router.post('/:id/transcript-screen', protect, async (req, res) => {
   try {
     const { id } = req.params;
-    const { transcript, questions, sessionType = 'ai_generated', difficulty = 'medium', meetingSource = 'webex' } = req.body;
+    const { transcript, questions, sessionType = 'bank_questions', difficulty = 'medium', meetingSource = 'webex' } = req.body;
 
-    if (!transcript || !transcript.trim()) {
-      return res.status(400).json({ message: 'Transcript text is required' });
-    }
-    if (!questions || questions.length === 0) {
-      return res.status(400).json({ message: 'No questions found. Please generate questions first.' });
-    }
+    if (!transcript || !transcript.trim()) return res.status(400).json({ message: 'Transcript text is required' });
+    if (!questions || questions.length === 0) return res.status(400).json({ message: 'No questions found. Please generate questions first.' });
 
     const candidate = await Candidate.findById(id);
     if (!candidate) return res.status(404).json({ message: 'Candidate not found' });
 
-    console.log(`[transcript-screen] Processing ${meetingSource} transcript for ${candidate.name} — ${questions.length} questions`);
+    console.log(`[transcript-screen] ${meetingSource} transcript for ${candidate.name} — ${questions.length} Qs`);
 
-    // Build AI prompt to extract answers from transcript
-    const questionsList = questions.map((q, idx) => (idx+1) + '. ' + q).join('\n');
-    const prompt = `You are analyzing a job interview transcript to extract and score candidate answers.
+    // ── Pre-process transcript ────────────────────────────────────
+    // Detect format and extract candidate speech intelligently
+    // Supported formats:
+    // 1. Webex: "0:32 : Speaker Name : text"
+    // 2. Teams: "[00:01:23] Speaker: text"
+    // 3. Zoom:  "Speaker Name: text"
+    // 4. Plain: any text
 
-INTERVIEW QUESTIONS ASKED:
+    const lines = transcript.split('\n').map(l => l.trim()).filter(Boolean);
+    
+    // Detect Webex format: "timestamp : Speaker : text"
+    const isWebex = lines.some(l => /^\d+:\d+\s*:\s*.+\s*:\s*.+/.test(l));
+    
+    let processedTranscript = transcript;
+    let detectedSpeakers = [];
+
+    if (isWebex) {
+      // Parse Webex format — group consecutive lines by same speaker
+      const parsed = [];
+      for (const line of lines) {
+        const match = line.match(/^(\d+:\d+)\s*:\s*(.+?)\s*:\s*(.+)$/);
+        if (match) {
+          const [, time, speaker, text] = match;
+          const last = parsed[parsed.length - 1];
+          if (last && last.speaker === speaker.trim()) {
+            last.text += ' ' + text.trim(); // merge consecutive lines from same speaker
+          } else {
+            parsed.push({ time, speaker: speaker.trim(), text: text.trim() });
+          }
+          if (!detectedSpeakers.includes(speaker.trim())) detectedSpeakers.push(speaker.trim());
+        }
+      }
+
+      // Identify who is the candidate (not the interviewer, not admin)
+      // Candidate is the person answering questions, not the one asking them
+      // Heuristic: the person who speaks AFTER the interviewer's questions
+      const questionKeywords = /question|how|what|explain|describe|tell me|can you|could you/i;
+      const interviewerCandidates = {};
+      for (let i = 0; i < parsed.length - 1; i++) {
+        if (questionKeywords.test(parsed[i].text)) {
+          // Next speaker after a question is likely the candidate
+          const responder = parsed[i+1]?.speaker;
+          if (responder && responder !== parsed[i].speaker) {
+            interviewerCandidates[responder] = (interviewerCandidates[responder] || 0) + 1;
+          }
+        }
+      }
+      
+      const likelyCandidateName = Object.entries(interviewerCandidates)
+        .sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+
+      console.log(`[transcript-screen] Detected candidate: "${likelyCandidateName}" | Speakers: ${detectedSpeakers.join(', ')}`);
+
+      // Build clean transcript showing Q&A pairs clearly
+      processedTranscript = parsed.map(p => {
+        const role = p.speaker === likelyCandidateName ? 'CANDIDATE' : 'INTERVIEWER';
+        return `[${p.time}] ${role} (${p.speaker}): ${p.text}`;
+      }).join('\n');
+    }
+
+    // ── AI Scoring ────────────────────────────────────────────────
+    const { callWithFallback } = require('../services/multiAiProviders');
+    const questionsList = questions.map((q, i) => `${i+1}. ${q}`).join('\n');
+
+    const prompt = `You are a senior technical interviewer analyzing a job interview transcript.
+
+INTERVIEW QUESTIONS (${questions.length} total):
 ${questionsList}
 
-MEETING TRANSCRIPT:
-${transcript.substring(0, 6000)}
+TRANSCRIPT (${isWebex ? 'Webex format, pre-processed' : 'raw'}):
+${processedTranscript.substring(0, 7000)}
 
-TASK:
-1. Find the candidate's answer to each question in the transcript
-2. If a question wasn't answered, note "Not answered in transcript"
-3. Score each answer from 0-100 based on: accuracy, depth, relevance, clarity
-4. Give brief feedback for each answer
+INSTRUCTIONS:
+- Extract what the CANDIDATE said in response to each question
+- The CANDIDATE label shows who is being interviewed
+- Score each answer 0-100: accuracy, depth, completeness, clarity
+- "I don't know" or no answer = 0-10
+- Partial answer = 20-50
+- Good answer = 60-80
+- Excellent detailed answer = 80-100
+- If question was not asked in this interview, set score to -1
+- Merge consecutive candidate lines that form one answer
 
-Return ONLY this JSON (no markdown):
+Return ONLY valid JSON, no markdown:
 {
+  "candidateName": "detected name of candidate",
   "answers": [
     {
-      "question": "question text",
-      "extractedAnswer": "candidate's answer from transcript",
+      "question": "exact question text",
+      "extractedAnswer": "what candidate said verbatim from transcript",
       "score": 75,
-      "feedback": "Brief feedback on the answer"
+      "feedback": "2-sentence feedback on quality of answer",
+      "answered": true
     }
   ],
   "overallScore": 72,
-  "transcriptQuality": "good/partial/poor",
-  "notes": "Any observations about the interview"
+  "transcriptQuality": "good",
+  "interviewNotes": "overall observations"
 }`;
 
     let scoringResult = null;
     try {
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + process.env.GROQ_API_KEY,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.2,
-          max_tokens: 2000
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const text = data.choices[0]?.message?.content || '{}';
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) scoringResult = JSON.parse(jsonMatch[0]);
+      const aiResponse = await callWithFallback([{ role: 'user', content: prompt }], 2500);
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        scoringResult = JSON.parse(jsonMatch[0]);
+        console.log(`[transcript-screen] AI scored: ${scoringResult.overallScore}/100 | Quality: ${scoringResult.transcriptQuality}`);
       }
     } catch (aiErr) {
       console.error('[transcript-screen AI error]', aiErr.message);
     }
 
-    // Build session from AI result or fallback
-    const answersData = scoringResult?.answers || questions.map((q, i) => ({
-      question: q,
-      extractedAnswer: 'Could not extract from transcript',
-      score: 0,
-      feedback: 'Answer extraction failed'
-    }));
+    if (!scoringResult) {
+      return res.status(503).json({ message: 'AI scoring failed — all providers busy. Please try again in 1 minute.' });
+    }
 
-    const overallScore = scoringResult?.overallScore ||
-      Math.round(answersData.reduce((s, a) => s + (a.score || 0), 0) / answersData.length);
+    // ── Build session ─────────────────────────────────────────────
+    const answersData = scoringResult.answers || [];
+    const validScores = answersData.filter(a => a.score >= 0).map(a => a.score);
+    const overallScore = scoringResult.overallScore ||
+      (validScores.length ? Math.round(validScores.reduce((s, v) => s + v, 0) / validScores.length) : 0);
 
     const session = {
       sessionType,
@@ -613,14 +662,25 @@ Return ONLY this JSON (no markdown):
       conductedBy: req.user.name,
       meetingSource,
       transcriptUsed: true,
-      answers: answersData.map((a, i) => ({
-        question: a.question || questions[i] || '',
-        userAnswer: a.extractedAnswer || '',
-        aiScore: a.score || 0,
-        aiFeedback: a.feedback || ''
-      })),
+      answers: questions.map((q, i) => {
+        const match = answersData.find(a =>
+          a.question?.toLowerCase().includes(q.toLowerCase().substring(0, 30)) ||
+          q.toLowerCase().includes((a.question || '').toLowerCase().substring(0, 30))
+        ) || answersData[i];
+        return {
+          question: q,
+          userAnswer: match?.extractedAnswer || 'Not found in transcript',
+          aiScore:   (match?.score >= 0) ? match.score : 0,
+          aiFeedback: match?.feedback || ''
+        };
+      }),
       screeningScore: overallScore,
-      screeningBreakdown: { transcriptQuality: scoringResult?.transcriptQuality, notes: scoringResult?.notes }
+      screeningBreakdown: {
+        transcriptQuality: scoringResult.transcriptQuality,
+        notes: scoringResult.interviewNotes,
+        detectedSpeakers: detectedSpeakers.join(', '),
+        candidateDetected: scoringResult.candidateName || ''
+      }
     };
 
     if (!candidate.screeningSessions) candidate.screeningSessions = [];
@@ -629,27 +689,22 @@ Return ONLY this JSON (no markdown):
     candidate.status = 'answers_submitted';
     await candidate.save();
 
-    await AuditLog.create({
-      user: req.user.name,
-      userId: req.user._id,
-      action: 'TRANSCRIPT_SCREENED',
-      resource: 'candidates',
-      details: `${candidate.name} | ${meetingSource} transcript | Score: ${overallScore}`
+    AuditLog.create({
+      user: req.user.name, userId: req.user._id,
+      action: 'TRANSCRIPT_SCREENED', resource: 'candidates',
+      details: `${candidate.name} | ${meetingSource} | Score: ${overallScore} | Quality: ${scoringResult.transcriptQuality}`
     }).catch(() => {});
 
-    console.log(`[transcript-screen] ✅ ${candidate.name} scored ${overallScore}/100 from transcript`);
+    console.log(`[transcript-screen] ✅ ${candidate.name} | Score: ${overallScore}/100 | ${scoringResult.transcriptQuality}`);
 
     res.json({
-      message: 'Transcript processed successfully',
+      message: 'Transcript processed and scored successfully',
       session,
       overallScore,
       screeningScore: overallScore,
-      transcriptQuality: scoringResult?.transcriptQuality || 'unknown',
-      candidate: {
-        _id: candidate._id,
-        screeningScore: candidate.screeningScore,
-        status: candidate.status
-      }
+      transcriptQuality: scoringResult.transcriptQuality,
+      candidateDetected: scoringResult.candidateName,
+      candidate: { _id: candidate._id, screeningScore: overallScore, status: candidate.status }
     });
 
   } catch (err) {

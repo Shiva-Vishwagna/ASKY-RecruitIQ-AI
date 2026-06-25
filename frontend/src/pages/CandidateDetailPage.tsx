@@ -578,7 +578,8 @@ export default function CandidateDetailPage() {
     ? Math.round(scoredSess.reduce((sum: number, s: any) => sum + s.screeningScore, 0) / scoredSess.length)
     : 0;
   const screenScore = sessionAvg > 0 ? sessionAvg : ((candidate.screeningScore && candidate.screeningScore > 0) ? candidate.screeningScore : null);
-  const combined    = screenScore ? (candidate.combinedScore || Math.round(cvScore*0.6 + screenScore*0.4)) : cvScore;
+  // Always recompute combined from live session data — never trust stale DB combinedScore
+  const combined    = screenScore ? Math.round(cvScore * 0.6 + screenScore * 0.4) : cvScore;
   const roleType   = candidate.roleType || (candidate.jobId as any)?.roleType || "technical";
   const isTech     = roleType !== "non_technical";
   const tierKey    = (candidate.tier || "C-Tier").replace(/-?Tier$/i, "");

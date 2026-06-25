@@ -282,22 +282,37 @@ export default function CandidateDetailPage() {
 
   async function uploadTranscript() {
     if (!transcriptText.trim() && !transcriptFile) {
-      alert("Please paste a transcript or upload a file");
+      alert("Please paste the transcript text or upload a .txt/.vtt file");
+      return;
+    }
+    if (questions.length === 0) {
+      alert("No questions found. Please go to Generate Questions tab first and generate questions, then come back to upload the transcript.");
       return;
     }
     setTranscriptLoading(true);
     try {
       let text = transcriptText;
-      // If file uploaded, read it as text
+
+      // Read file as text — .txt, .vtt, .srt work directly
+      // .docx needs backend parsing (it's the meeting SUMMARY not transcript)
       if (transcriptFile) {
-        text = await new Promise<string>((resolve) => {
+        const fname = transcriptFile.name.toLowerCase();
+        if (fname.endsWith('.docx') || fname.endsWith('.doc')) {
+          alert("⚠️ Note: Word (.docx) files are usually meeting summaries, not transcripts.\n\nFor best results, upload the .txt or .vtt transcript file from Webex/Teams/Zoom.\n\nTrying to process anyway...");
+        }
+        text = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = (e) => resolve(e.target?.result as string || "");
+          reader.onerror = () => reject(new Error("Could not read file"));
           reader.readAsText(transcriptFile);
         });
       }
 
-      // Send transcript + questions to backend for AI extraction
+      if (!text || text.trim().length < 50) {
+        alert("The transcript appears to be empty or too short. Please check the file and try again.");
+        return;
+      }
+
       const r = await fetch(`${API}/candidates/${id}/transcript-screen`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -306,22 +321,31 @@ export default function CandidateDetailPage() {
           questions: questions,
           sessionType: qMode === "ai" ? "ai_generated" : "bank_questions",
           difficulty: isTech ? difficulty : "medium",
-          meetingSource: "webex"
+          meetingSource: transcriptFile?.name.toLowerCase().includes('zoom') ? 'zoom' :
+                         transcriptFile?.name.toLowerCase().includes('teams') ? 'teams' : 'webex'
         }),
       });
       const d = await r.json();
-      if (!r.ok) { alert(d.message || "Transcript processing failed"); return; }
+      if (!r.ok) {
+        alert(d.message || "Transcript processing failed. Please try again.");
+        return;
+      }
+      // Show result summary
+      const quality = d.transcriptQuality || 'unknown';
+      const score   = d.overallScore || 0;
+      const detected = d.candidateDetected ? `\nCandidate detected: ${d.candidateDetected}` : '';
+      console.log(`Transcript scored: ${score}/100 | Quality: ${quality}${detected}`);
+
       setScreenResult(d);
       setCandidate(p => p ? {
         ...p,
-        screeningScore: d.session?.screeningScore || d.overallScore || 0,
+        screeningScore: d.overallScore || 0,
         screeningSessions: [...(p.screeningSessions || []), d.session],
-        combinedScore: d.session?.screeningScore || 0,
         status: "answers_submitted"
       } : p);
-      setTab("hm-report");
+      setTab("sessions");
     } catch(err) {
-      alert("Failed to process transcript. Please try again.");
+      alert("Failed to process transcript. Please check the file format and try again.");
     } finally { setTranscriptLoading(false); }
   }
 
@@ -1263,7 +1287,7 @@ export default function CandidateDetailPage() {
                           <p className="text-sm font-semibold text-gray-700">
                             {transcriptFile ? `✅ ${transcriptFile.name}` : "Upload transcript file"}
                           </p>
-                          <p className="text-xs text-gray-400 mt-1">Supports .txt, .vtt, .srt, .docx</p>
+                          <p className="text-xs text-gray-400 mt-1">Best: .txt or .vtt from Webex/Teams/Zoom · Also: .srt, .docx</p>
                           <div className="mt-2 bg-purple-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold inline-block hover:bg-purple-700">
                             Choose File
                           </div>

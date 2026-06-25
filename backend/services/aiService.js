@@ -328,6 +328,7 @@ ${qaPairs}
 For each answer (1-${questions.length}):
 1. Score from 0-100 based on: accuracy, depth, relevance, communication
 2. Provide brief feedback (1-2 sentences)
+3. overallScore MUST equal the mathematical average of all individual scores (sum / count)
 
 Return ONLY JSON, no markdown:
 {
@@ -350,10 +351,15 @@ Return ONLY JSON, no markdown:
     }
 
     const evaluation = JSON.parse(jsonMatch[0]);
+    const scores = evaluation.scores || answers.map(() => 0);
+    // Compute overallScore as true avg of individual scores — do not trust AI-returned overall
+    const computedOverall = scores.length > 0
+      ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+      : (evaluation.overallScore || 0);
     return {
-      scores: evaluation.scores || answers.map(() => 0),
+      scores,
       feedback: evaluation.feedback || answers.map(() => 'Evaluated'),
-      overallScore: evaluation.overallScore || 0,
+      overallScore: computedOverall,
       breakdown: evaluation.breakdown || {}
     };
   } catch (err) {

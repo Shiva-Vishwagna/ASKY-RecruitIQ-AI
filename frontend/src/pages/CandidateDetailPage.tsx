@@ -571,8 +571,14 @@ export default function CandidateDetailPage() {
   );
 
   const cvScore    = candidate.aiScore || candidate.score || 0;
-  const screenScore = (candidate.screeningScore && candidate.screeningScore > 0) ? candidate.screeningScore : null;
-  const combined   = screenScore ? (candidate.combinedScore || Math.round(cvScore*0.6 + screenScore*0.4)) : cvScore;
+  // Compute avg from sessions client-side as source of truth
+  const allSessions = candidate.screeningSessions || [];
+  const scoredSess  = allSessions.filter((s: any) => s.screeningScore > 0);
+  const sessionAvg  = scoredSess.length > 0
+    ? Math.round(scoredSess.reduce((sum: number, s: any) => sum + s.screeningScore, 0) / scoredSess.length)
+    : 0;
+  const screenScore = sessionAvg > 0 ? sessionAvg : ((candidate.screeningScore && candidate.screeningScore > 0) ? candidate.screeningScore : null);
+  const combined    = screenScore ? (candidate.combinedScore || Math.round(cvScore*0.6 + screenScore*0.4)) : cvScore;
   const roleType   = candidate.roleType || (candidate.jobId as any)?.roleType || "technical";
   const isTech     = roleType !== "non_technical";
   const tierKey    = (candidate.tier || "C-Tier").replace(/-?Tier$/i, "");
@@ -1357,7 +1363,25 @@ Example format:
         {/* SESSIONS */}
         {tab==="sessions" && (
           <div className="space-y-4">
-            <h2 className="font-bold text-gray-900">Screening History</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-gray-900">Screening History</h2>
+              {sessions.length > 0 && (() => {
+                const scored = sessions.filter(s => s.screeningScore > 0);
+                const avg = scored.length > 0 ? Math.round(scored.reduce((sum,s) => sum + s.screeningScore, 0) / scored.length) : 0;
+                return (
+                  <div className="flex items-center gap-4 bg-white border border-gray-100 rounded-xl px-4 py-2 text-sm">
+                    <span className="text-gray-400">{sessions.length} session{sessions.length!==1?'s':''}</span>
+                    {scored.length < sessions.length && <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">{sessions.length - scored.length} unscored excluded</span>}
+                    <span className="text-gray-300">|</span>
+                    <span className="text-gray-500">Avg screening score:</span>
+                    <span className={`font-black text-lg ${clr(avg)}`}>{avg}/100</span>
+                    <span className="text-gray-300">|</span>
+                    <span className="text-gray-500">Combined:</span>
+                    <span className={`font-black text-lg ${clr(combined)}`}>{combined}/100</span>
+                  </div>
+                );
+              })()}
+            </div>
             {sessions.length===0 ? (
               <div className="bg-white rounded-2xl p-10 border border-gray-100 text-center text-gray-400">
                 <div className="text-4xl mb-3">📋</div><p>No screening sessions yet</p>

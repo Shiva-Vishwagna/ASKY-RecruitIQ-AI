@@ -391,7 +391,15 @@ router.post('/:id/answers', protect, async (req, res) => {
       candidate.screeningSessions = [];
     }
     candidate.screeningSessions.push(session);
-    candidate.screeningScore = session.screeningScore;
+
+    // ── Avg of ALL sessions (skip 0-score sessions from failed/incomplete attempts) ──
+    const scoredSessions = candidate.screeningSessions.filter(s => s.screeningScore > 0);
+    const avgScreeningScore = scoredSessions.length > 0
+      ? Math.round(scoredSessions.reduce((sum, s) => sum + s.screeningScore, 0) / scoredSessions.length)
+      : session.screeningScore;
+
+    candidate.screeningScore = avgScreeningScore;
+    candidate.combinedScore  = Math.round((candidate.aiScore || 0) * 0.6 + avgScreeningScore * 0.4);
     candidate.screeningAnswers = session.answers;
     candidate.status = 'answers_submitted';
 
@@ -403,15 +411,15 @@ router.post('/:id/answers', protect, async (req, res) => {
       userId: req.user._id,
       action: 'SCREENING_SUBMITTED',
       resource: 'candidates',
-      details: `${candidate.name} | Score: ${session.screeningScore} | ${sessionType}`
+      details: `${candidate.name} | Session Score: ${session.screeningScore} | Avg: ${avgScreeningScore} | Combined: ${candidate.combinedScore} | ${sessionType}`
     }).catch(() => {});
 
     res.json({
       message: 'Answers evaluated successfully',
       session,
       overallScore: session.screeningScore,
-      screeningScore: session.screeningScore,
-      combinedScore: candidate.combinedScore || session.screeningScore,
+      screeningScore: avgScreeningScore,
+      combinedScore: candidate.combinedScore,
       recommendation: candidate.recommendation,
       candidate: {
         _id: candidate._id,
@@ -697,7 +705,15 @@ Return ONLY valid JSON, no markdown:
 
     if (!candidate.screeningSessions) candidate.screeningSessions = [];
     candidate.screeningSessions.push(session);
-    candidate.screeningScore = overallScore;
+
+    // Avg of all scored sessions
+    const scoredSessionsTx = candidate.screeningSessions.filter(s => s.screeningScore > 0);
+    const avgScreeningScoreTx = scoredSessionsTx.length > 0
+      ? Math.round(scoredSessionsTx.reduce((sum, s) => sum + s.screeningScore, 0) / scoredSessionsTx.length)
+      : overallScore;
+
+    candidate.screeningScore = avgScreeningScoreTx;
+    candidate.combinedScore  = Math.round((candidate.aiScore || 0) * 0.6 + avgScreeningScoreTx * 0.4);
     candidate.status = 'answers_submitted';
     await candidate.save();
 

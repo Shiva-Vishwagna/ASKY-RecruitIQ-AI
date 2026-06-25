@@ -73,6 +73,7 @@ connectDB();
 app.use('/api/auth',       require('./routes/auth'));
 app.use('/api/jobs',       require('./routes/jobs'));
 app.use('/api/candidates', require('./routes/candidates'));
+app.use('/api/storage',    require('./routes/storage'));
 app.use('/api/resumes',    require('./routes/resumes'));
 app.use('/api/admin',      require('./routes/admin'));
 app.use('/api/settings',   require('./routes/settings'));

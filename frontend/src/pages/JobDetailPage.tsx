@@ -176,10 +176,7 @@ export default function JobDetailPage() {
       setUploadProgress({ total: files.length, done: saved + dupes, current: msg });
       // Show duplicate details if any
       if (d.duplicateDetails && d.duplicateDetails.length > 0) {
-        setTimeout(() => alert("⚠️ Duplicate candidates skipped:
-
-" + d.duplicateDetails.join("
-")), 500);
+        setTimeout(() => alert("⚠️ Duplicate candidates skipped:\n\n" + d.duplicateDetails.join("\n")), 500);
       }
       await fetchCandidates();
       setTimeout(() => setUploadProgress(null), 4000);

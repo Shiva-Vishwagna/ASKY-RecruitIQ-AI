@@ -39,7 +39,7 @@ const CandidateSchema = new mongoose.Schema({
         depth:     { type: Number, default: 0 },
         relevance: { type: Number, default: 0 },
       },
-      aiFeedback: { type: String, maxlength: 300 },
+      aiFeedback: { type: String, maxlength: 1000 },
     }],
     screeningScore: { type: Number, min: 0, max: 100 },
     screeningBreakdown: {
@@ -65,7 +65,7 @@ const CandidateSchema = new mongoose.Schema({
       depth:     { type: Number, default: 0 },
       relevance: { type: Number, default: 0 },
     },
-    aiFeedback: { type: String, maxlength: 300 },
+    aiFeedback: { type: String, maxlength: 1000 },
   }],
 
   // ── HM Package (recruiter-selected report to share) ───────

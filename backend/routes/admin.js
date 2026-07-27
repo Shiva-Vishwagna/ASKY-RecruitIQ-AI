@@ -118,4 +118,45 @@ router.get('/stats', async (req, res) => {
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
+// ── GET /api/admin/recruita-export-status ──────────────────────
+// Per-recruiter checkpoint: how many candidates each recruiter has
+// exported to RecruiTA so far, and the most recent candidate (by Date
+// Added) that's already been included in an export — i.e. "everything
+// added after this candidate for this recruiter is still pending".
+router.get('/recruita-export-status', async (req, res) => {
+  try {
+    const Candidate = require('../models/Candidate');
+    const candidates = await Candidate.find({})
+      .select('name uploadedByName createdAt exportedToRecruiTA exportedToRecruiTAAt')
+      .lean();
+
+    const byRecruiter = {};
+    for (const c of candidates) {
+      const recruiter = c.uploadedByName || 'Unknown';
+      if (!byRecruiter[recruiter]) {
+        byRecruiter[recruiter] = {
+          recruiter, total: 0, exported: 0, pending: 0,
+          lastExportedAt: null, checkpointCandidate: null, checkpointDate: null,
+        };
+      }
+      const bucket = byRecruiter[recruiter];
+      bucket.total++;
+      if (c.exportedToRecruiTA) {
+        bucket.exported++;
+        if (!bucket.lastExportedAt || new Date(c.exportedToRecruiTAAt) > new Date(bucket.lastExportedAt)) {
+          bucket.lastExportedAt = c.exportedToRecruiTAAt;
+        }
+        if (!bucket.checkpointDate || new Date(c.createdAt) > new Date(bucket.checkpointDate)) {
+          bucket.checkpointDate = c.createdAt;
+          bucket.checkpointCandidate = c.name;
+        }
+      } else {
+        bucket.pending++;
+      }
+    }
+
+    res.json({ recruiters: Object.values(byRecruiter).sort((a, b) => b.pending - a.pending) });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
 module.exports = router;

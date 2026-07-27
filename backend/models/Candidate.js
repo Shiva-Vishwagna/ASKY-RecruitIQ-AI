@@ -86,6 +86,14 @@ const CandidateSchema = new mongoose.Schema({
   interviewDate:       { type: Date },
   interviewNotes:      { type: String, default: '' },
   source:              { type: String, default: 'Direct' },
+
+  // ── RecruiTA export tracking ──────────────────────────────
+  // Lets each recruiter (and admins) see which candidates have already
+  // been exported/uploaded into RecruiTA, so re-exports only pick up new ones.
+  exportedToRecruiTA:   { type: Boolean, default: false },
+  exportedToRecruiTAAt: { type: Date },
+  exportedToRecruiTABy: { type: String, maxlength: 50 },
+
   companiesWorkedAt:    { type: Number, default: 0 },
   shortTenureCompanies: [{ type: String }],
   averageTenureYears:   { type: Number, default: 0 },

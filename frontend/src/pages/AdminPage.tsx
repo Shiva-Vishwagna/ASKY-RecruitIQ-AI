@@ -9,6 +9,11 @@ interface User {
   createdAt?: string;
 }
 
+interface RecruiTAExportStatus {
+  recruiter: string; total: number; exported: number; pending: number;
+  lastExportedAt: string | null; checkpointCandidate: string | null; checkpointDate: string | null;
+}
+
 const API   = "https://asky-recruitiq-ai.onrender.com/api";
 const token = () => localStorage.getItem("token") || "";
 
@@ -21,6 +26,8 @@ export default function AdminPage() {
   const [showAdd, setShowAdd]     = useState(false);
   const [editUser, setEditUser]   = useState<User | null>(null);
   const [msg, setMsg]             = useState<{text:string; type:"success"|"error"} | null>(null);
+  const [exportStatus, setExportStatus] = useState<RecruiTAExportStatus[]>([]);
+  const [exportStatusLoading, setExportStatusLoading] = useState(true);
 
   const [form, setForm] = useState({
     name: "", email: "", password: "", role: "recruiter" as "admin"|"recruiter", isActive: true
@@ -30,7 +37,17 @@ export default function AdminPage() {
     try { return JSON.parse(localStorage.getItem("user") || "{}"); } catch { return {}; }
   })();
 
-  useEffect(() => { fetchUsers(); }, []);
+  useEffect(() => { fetchUsers(); fetchExportStatus(); }, []);
+
+  async function fetchExportStatus() {
+    setExportStatusLoading(true);
+    try {
+      const r = await fetch(`${API}/admin/recruita-export-status`, { headers: { Authorization: `Bearer ${token()}` } });
+      const d = await r.json();
+      setExportStatus(d.recruiters || []);
+    } catch { setExportStatus([]); }
+    finally { setExportStatusLoading(false); }
+  }
 
   function flash(text: string, type: "success"|"error" = "success") {
     setMsg({ text, type });
@@ -310,6 +327,52 @@ export default function AdminPage() {
             ) : (
               <UserTable users={recruiters} currentUserId={currentUser._id}
                 onEdit={setEditUser} onToggle={toggleActive} onDelete={deleteUser} onReset={resetPassword}/>
+            )}
+          </div>
+
+          {/* RecruiTA Export Status */}
+          <div className="bg-white rounded-2xl border border-gray-100">
+            <div className="px-5 py-4 border-b border-gray-50 flex items-center justify-between">
+              <h2 className="font-bold text-gray-900">📤 RecruiTA Export Status</h2>
+              <span className="text-xs text-gray-400">Per-recruiter checkpoint — how far each recruiter has uploaded into RecruiTA</span>
+            </div>
+            {exportStatusLoading ? (
+              <div className="p-8 text-center text-gray-400 text-sm">Loading…</div>
+            ) : exportStatus.length === 0 ? (
+              <div className="p-8 text-center text-gray-400 text-sm">No candidates exported to RecruiTA yet.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs font-bold text-gray-400 uppercase border-b border-gray-50">
+                    <th className="px-5 py-3">Recruiter</th>
+                    <th className="px-5 py-3">Exported</th>
+                    <th className="px-5 py-3">Pending</th>
+                    <th className="px-5 py-3">Last Exported</th>
+                    <th className="px-5 py-3">Checkpoint (up to)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {exportStatus.map(r => (
+                    <tr key={r.recruiter} className="border-b border-gray-50 last:border-0">
+                      <td className="px-5 py-3 font-semibold text-gray-800">{r.recruiter}</td>
+                      <td className="px-5 py-3 text-emerald-600 font-medium">{r.exported} / {r.total}</td>
+                      <td className="px-5 py-3">
+                        {r.pending > 0
+                          ? <span className="text-amber-600 font-medium">{r.pending} new</span>
+                          : <span className="text-gray-400">Up to date</span>}
+                      </td>
+                      <td className="px-5 py-3 text-gray-500">
+                        {r.lastExportedAt ? new Date(r.lastExportedAt).toLocaleDateString() : "—"}
+                      </td>
+                      <td className="px-5 py-3 text-gray-500">
+                        {r.checkpointCandidate
+                          ? <>{r.checkpointCandidate} <span className="text-gray-400">({r.checkpointDate ? new Date(r.checkpointDate).toLocaleDateString() : "—"})</span></>
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
 

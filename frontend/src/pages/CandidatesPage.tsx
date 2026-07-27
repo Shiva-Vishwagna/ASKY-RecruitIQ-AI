@@ -1,16 +1,59 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import * as XLSX from "xlsx";
 
 interface Candidate {
   _id: string; name: string; email: string;
-  jobTitle?: string; jobDepartment?: string; appliedFor?: string;
+  jobTitle?: string; jobDepartment?: string; jobLocation?: string; appliedFor?: string;
   score?: number; aiScore?: number; tier: string; riskLevel: string;
   appliedAt?: string; createdAt?: string; updatedAt?: string; status?: string;
   summary?: string; topSkills?: string[]; skills?: string[];
   strengths?: string[]; gaps?: string[];
   domain?: string; seniority?: string; experienceYears?: number;
   technicalExperience?: string; leadershipExperience?: string; cloudExpertise?: string;
-  recommendation?: string; phone?: string;
+  recommendation?: string; phone?: string; source?: string; uploadedByName?: string;
+  notes?: { text: string; createdBy?: string; createdAt?: string }[];
+  exportedToRecruiTA?: boolean; exportedToRecruiTAAt?: string; exportedToRecruiTABy?: string;
+}
+
+// ── RecruiTA "Sourcing Tracker" export format ──────────────────
+// These are the exact column headers/order RecruiTA's import expects.
+// Keep this in sync with RecruiTA's template — do not reorder or rename.
+const RECRUITA_HEADERS = [
+  "Candidate", "Work Area", "Location", "Source", "Department", "Job Role",
+  "Company", "Notice Period", "Contact", "Email", "Remarks", "Date Added",
+  "Main Status", "Sub Status", "Declined Date", "Rejected Date", "Left Date",
+  "CURRENT CTC", "EXPECTED CTC", "COUNTER OFFER DETAILS", "Experience",
+];
+
+// RecruitIQ's internal pipeline status → RecruiTA's "Main Status" values.
+// RecruiTA has no equivalent of RecruitIQ's stages, so this is a best-effort
+// default mapping. Adjust the right-hand values if your team maps stages
+// differently — they must match RecruiTA's existing status list exactly.
+const RECRUITA_STATUS_MAP: Record<string, string> = {
+  cv_uploaded:       "Screening TBS",
+  ai_screened:       "Screening TBS",
+  questions_sent:    "Screening Scheduled",
+  answers_submitted: "L1 Scheduled",
+  hm_ready:          "Advance Stage",
+  rejected:          "Screen Reject",
+};
+
+// RecruiTA stores dates as plain text like "20 Jul 2026" (not a native Excel
+// date). Match that exactly so the import parser doesn't choke on a real date cell.
+function toRecruiTADate(dateStr?: string): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "";
+  const day   = String(d.getDate()).padStart(2, "0");
+  const month = d.toLocaleString("en-US", { month: "short" });
+  return `${day} ${month} ${d.getFullYear()}`;
+}
+
+// RecruiTA stores experience as e.g. "6years" / "2.6years" — no space, "years" suffix.
+function toRecruiTAExperience(years?: number): string {
+  if (years === undefined || years === null) return "";
+  return `${years}years`;
 }
 
 const tierColors: Record<string, string> = {
@@ -305,6 +348,8 @@ export default function CandidatesPage() {
   const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set());
   const [bulkStatus, setBulkStatus]       = useState("");
   const [bulkLoading, setBulkLoading]     = useState(false);
+  const [exportOnlyNew, setExportOnlyNew] = useState(true);
+  const [exporting, setExporting]         = useState(false);
 
   const API   = "https://asky-recruitiq-ai.onrender.com/api";
   const token = localStorage.getItem("token");
@@ -396,6 +441,97 @@ export default function CandidatesPage() {
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "candidates.csv"; a.click();
   }
 
+  // Exports candidates as an .xlsx matching RecruiTA's "My Sourcing" import
+  // template exactly — same headers, same order, same plain-text date/
+  // experience formatting — so it can be uploaded into RecruiTA with no
+  // manual editing. Fields RecruitIQ doesn't track yet (Job Role, Company,
+  // Notice Period, CTCs, Sub Status, etc.) are left blank rather than dropped,
+  // per RecruiTA's column contract.
+  //
+  // Date-specific: uses whatever the "Date Added" range filter (dateFrom/
+  // dateTo) is currently set to, since `filtered` already applies it.
+  // Checkpoint: when "Only new" is on, candidates already marked as exported
+  // are skipped, and everything included here gets marked exported afterward
+  // so the next export naturally continues from where this one left off.
+  async function exportRecruiTAExcel() {
+    const candidatesToExport = filtered.filter(c => !exportOnlyNew || !c.exportedToRecruiTA);
+
+    if (candidatesToExport.length === 0) {
+      alert(exportOnlyNew
+        ? "Nothing new to export — every candidate in the current filter has already been exported to RecruiTA."
+        : "No candidates match the current filter.");
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const rows = candidatesToExport.map(c => {
+        const latestNote = c.notes && c.notes.length ? c.notes[c.notes.length - 1].text : "";
+        return [
+          c.name || "",                                    // Candidate
+          c.jobTitle || c.appliedFor || "",                 // Work Area
+          c.jobLocation || "",                              // Location
+          c.source || "",                                   // Source
+          c.jobDepartment || "",                             // Department
+          "",                                                // Job Role (not tracked in RecruitIQ)
+          "",                                                // Company (current company — not tracked)
+          "",                                                // Notice Period (not tracked as a discrete value)
+          c.phone || "",                                     // Contact
+          c.email || "",                                     // Email
+          latestNote,                                        // Remarks
+          toRecruiTADate(c.createdAt || c.appliedAt),         // Date Added
+          RECRUITA_STATUS_MAP[c.status || ""] || "",          // Main Status
+          "",                                                // Sub Status (not tracked)
+          "",                                                // Declined Date (not tracked)
+          c.status === "rejected" ? toRecruiTADate(c.updatedAt) : "", // Rejected Date
+          "",                                                // Left Date (not tracked)
+          "",                                                // CURRENT CTC (not tracked)
+          "",                                                // EXPECTED CTC (not tracked)
+          "",                                                // COUNTER OFFER DETAILS (not tracked)
+          toRecruiTAExperience(c.experienceYears),            // Experience
+        ];
+      });
+
+      const sheetData = [RECRUITA_HEADERS, ...rows];
+      const ws = XLSX.utils.aoa_to_sheet(sheetData);
+
+      // Auto column widths, based on the longest value (or header) in each column.
+      ws["!cols"] = RECRUITA_HEADERS.map((header, colIdx) => {
+        const longest = sheetData.reduce((max, row) => {
+          const val = row[colIdx] == null ? "" : String(row[colIdx]);
+          return Math.max(max, val.length);
+        }, header.length);
+        return { wch: Math.min(Math.max(longest + 2, 10), 40) };
+      });
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "My Sourcing");
+
+      const today = new Date();
+      const stamp = `${String(today.getDate()).padStart(2, "0")}${String(today.getMonth() + 1).padStart(2, "0")}${today.getFullYear()}`;
+      XLSX.writeFile(wb, `RecruitIQ_Sourcing_${stamp}.xlsx`);
+
+      // Mark these candidates as exported so the next export (by this
+      // recruiter or an admin) knows exactly where the last one left off.
+      const ids = candidatesToExport.map(c => c._id);
+      const res = await fetch(`${API}/candidates/mark-recruita-exported`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ candidateIds: ids }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const exportedAt = data.exportedAt || new Date().toISOString();
+        const idSet = new Set(ids);
+        setCandidates(prev => prev.map(c => idSet.has(c._id)
+          ? { ...c, exportedToRecruiTA: true, exportedToRecruiTAAt: exportedAt, exportedToRecruiTABy: user.name }
+          : c));
+      }
+    } finally {
+      setExporting(false);
+    }
+  }
+
   function resetFilters() {
     setSearch(""); setJobFilter("all"); setTierFilter("all");
     setStatusFilter("all"); setScoreMin(0); setScoreMax(100);
@@ -405,6 +541,24 @@ export default function CandidatesPage() {
   const uniqueJobs = Array.from(new Set(
     candidates.map(c => c.jobTitle || c.appliedFor || "").filter(Boolean)
   )).sort();
+
+  // Checkpoint: among candidates this recruiter sourced that have already
+  // been exported to RecruiTA, the one added most recently — i.e. "we've
+  // uploaded RecruiTA details up through here; anything added after this
+  // is still pending export."
+  const recruiTACheckpoint = (() => {
+    const own = candidates.filter(c =>
+      (c.uploadedByName === user.name) && c.exportedToRecruiTA && c.exportedToRecruiTAAt
+    );
+    if (own.length === 0) return null;
+    const latest = own.reduce((a, b) =>
+      new Date(a.createdAt || a.appliedAt || 0) > new Date(b.createdAt || b.appliedAt || 0) ? a : b
+    );
+    const lastExportedAt = own.reduce((max, c) =>
+      new Date(c.exportedToRecruiTAAt!) > new Date(max) ? c.exportedToRecruiTAAt! : max
+    , own[0].exportedToRecruiTAAt!);
+    return { name: latest.name, dateAdded: latest.createdAt || latest.appliedAt, exportedAt: lastExportedAt };
+  })();
 
   const activeCandidates = candidates.filter(c => c.status !== "rejected" && c.status !== "hm_ready");
   const stuck7Count    = activeCandidates.filter(c => getDaysInStage(c) >= 7).length;
@@ -478,11 +632,25 @@ export default function CandidatesPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">All Candidates</h1>
           <p className="text-gray-500 mt-1">{candidates.length} total · {filtered.length} shown</p>
+          {recruiTACheckpoint && (
+            <p className="text-xs text-gray-400 mt-1">
+              RecruiTA: last exported {new Date(recruiTACheckpoint.exportedAt).toLocaleDateString()} · up to <span className="font-semibold text-gray-500">{recruiTACheckpoint.name}</span> (added {toRecruiTADate(recruiTACheckpoint.dateAdded)})
+            </p>
+          )}
         </div>
-        <div className="flex gap-3">
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs text-gray-500 font-medium select-none">
+            <input type="checkbox" checked={exportOnlyNew} onChange={e => setExportOnlyNew(e.target.checked)} />
+            Only new (not yet exported)
+          </label>
+
           <button onClick={fetchCandidates} className="border border-gray-200 bg-white text-gray-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-gray-50 text-sm">↻ Refresh</button>
 
           <button onClick={exportCSV} className="border border-gray-200 bg-white text-gray-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-gray-50 text-sm">↓ Export CSV</button>
+
+          <button onClick={exportRecruiTAExcel} disabled={exporting} className="border border-gray-200 bg-white text-gray-700 px-4 py-2.5 rounded-xl font-semibold hover:bg-gray-50 text-sm disabled:opacity-50">
+            {exporting ? "Exporting…" : "↓ Export to RecruiTA"}
+          </button>
         </div>
       </div>
 

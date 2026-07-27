@@ -25,8 +25,22 @@ router.get('/', protect, async (req, res) => {
         { uploadedByName: req.user.name }
       ]
     };
-    const candidates = await Candidate.find(filter).sort({ createdAt: -1 });
-    res.json({ candidates });
+    // Populate department/location from the linked Job so exports (e.g. the
+    // RecruiTA Excel export) can include them without a redesign of the schema.
+    const candidates = await Candidate.find(filter)
+      .populate('jobId', 'department location title')
+      .sort({ createdAt: -1 });
+
+    // Flatten the populated job fields onto each candidate for easy frontend use,
+    // without removing the original jobId reference.
+    const withJobFields = candidates.map(c => {
+      const obj = c.toObject();
+      obj.jobDepartment = obj.jobId?.department || '';
+      obj.jobLocation   = obj.jobId?.location || '';
+      return obj;
+    });
+
+    res.json({ candidates: withJobFields });
   } catch (err) {
     console.error('[GET /candidates]', err.message);
     res.status(500).json({ message: err.message });
@@ -798,6 +812,38 @@ router.post('/bulk-rescreen', protect, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: 'Admins only' });
     const zeroCandidates = await Candidate.find({ aiScore: { $in: [0, null] } }).select('_id name').limit(50);
     res.json({ candidates: zeroCandidates, count: zeroCandidates.length, message: `Found ${zeroCandidates.length} candidates needing re-screen` });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── POST /api/candidates/mark-recruita-exported ──────────────────
+// Called by the frontend right after it generates the RecruiTA Excel
+// export, so each recruiter has a checkpoint of which candidates have
+// already been uploaded into RecruiTA and don't need re-exporting.
+router.post('/mark-recruita-exported', protect, async (req, res) => {
+  try {
+    const { candidateIds } = req.body;
+    if (!Array.isArray(candidateIds) || candidateIds.length === 0) {
+      return res.status(400).json({ message: 'candidateIds array is required' });
+    }
+    const now = new Date();
+    const safeName = (req.user.name || '').toString().slice(0, 50);
+    const result = await Candidate.updateMany(
+      { _id: { $in: candidateIds } },
+      { $set: {
+          exportedToRecruiTA:   true,
+          exportedToRecruiTAAt: now,
+          exportedToRecruiTABy: safeName,
+        }
+      }
+    );
+
+    AuditLog.create({
+      user: req.user.name, userId: req.user._id,
+      action: 'RECRUITA_EXPORTED', resource: 'candidates',
+      details: `${candidateIds.length} candidate(s) exported to RecruiTA`,
+    }).catch(() => {});
+
+    res.json({ updated: result.modifiedCount ?? candidateIds.length, exportedAt: now });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
